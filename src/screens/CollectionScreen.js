@@ -36,8 +36,6 @@ import Svg, { Path } from 'react-native-svg';
 import { selectContactPhone } from 'react-native-select-contact';
 
 const collectionIconPaths = {
-  // Copied from Android drawables: ic_dashboard, ic_search_account,
-  // ic_arrow_left, and ic_arrow_right.
   dashboard: 'M520 360V120h320v240H520ZM120 520V120h320v400H120ZM520 840V440h320v400H520ZM120 840V600h320v240H120ZM200 440h160V200H200v240ZM600 760h160V520H600v240ZM600 280h160v-80H600v80ZM200 760h160v-80H200v80Z',
   search: 'M824 880 716 772q-22 13-46 20.5t-50 7.5q-75 0-127.5-52.5T440 620q0-75 52.5-127.5T620 440q75 0 127.5 52.5T800 620q0 26-7.5 50T772 716l108 108-56 56ZM620 720q42 0 71-29t29-71q0-42-29-71t-71-29q-42 0-71 29t-29 71q0 42 29 71t71 29ZM840 400h-80V200h-80v120H280V200h-80v560h200v80H200q-33 0-56.5-23.5T120 760V200q0-33 23.5-56.5T200 120h167q11-35 43-57.5T480 40q40 0 71.5 22.5T594 120h166q33 0 56.5 23.5T840 200v200ZM480 200q17 0 28.5-11.5T520 160q0-17-11.5-28.5T480 120q-17 0-28.5 11.5T440 160q0 17 11.5 28.5T480 200Z',
   previous: 'M440 720 200 480l240-240 56 56-183 184 183 184-56 56ZM704 720 464 480l240-240 56 56-183 184 183 184-56 56Z',
@@ -46,7 +44,6 @@ const collectionIconPaths = {
 
 const CollectionIcon = ({ name, size, color, style }) => (
   name === 'location' ? (
-    // Copied from Android drawable ic_location.xml.
     <Svg width={size} height={size} viewBox="0 0 64 64" style={style} accessibilityRole="image">
       <Path d="M32 0C18.745 0 8 10.745 8 24c0 5.678 2.502 10.671 5.271 15l17.097 24.156C30.743 63.686 31.352 64 32 64s1.257-.314 1.632-.844L50.729 39C53.375 35.438 56 29.678 56 24 56 10.745 45.255 0 32 0ZM48.087 39h-.01L32 61 15.923 39h-.01C13.469 35.469 10 29.799 10 24c0-12.15 9.85-22 22-22s22 9.85 22 22c0 5.799-3.719 11.781-5.913 15Z" fill="#394240" />
       <Path d="M32 14c-5.523 0-10 4.478-10 10s4.477 10 10 10 10-4.478 10-10-4.477-10-10-10Zm0 18c-4.418 0-8-3.582-8-8s3.582-8 8-8 8 3.582 8 8-3.582 8-8 8Z" fill="#394240" />
@@ -62,23 +59,9 @@ const CollectionIcon = ({ name, size, color, style }) => (
   )
 );
 
-// Matches CollectionViewModel.java text/flow exactly:
-// Header: "Current Collection" summary -> Total Amount, Uploaded/Pending counts
-// Account details: Account Number, Balance, Lean Account Number, Lean Amount,
-//   Opening Date, Last Collection Date, Scheme
-// Amount input with live validation ("Amount cannot be empty",
-//   "Amount must be greater than 0", "Max 2 decimal places allowed",
-//   "You can collect upto ₹X")
-// Collect button -> Receipt "#{number}" shown -> Print / Collect Again
-// Previous / Next to move between downloaded accounts
-// Search / View All / Uncollected filters -> account list bottom sheet
-// Dashboard link to go back
 const CollectionScreen = ({ navigation, route }) => {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  // The supplied layout is based on a wide device screenshot. Keep its roomy
-  // proportions there, while preventing the cards from becoming too narrow on
-  // standard 360–390dp phones.
   const isCompact = screenWidth < 390;
   const contentPadding = screenWidth >= 500 ? 42 : 20;
   const [accounts, setAccounts] = useState([]);
@@ -92,8 +75,8 @@ const CollectionScreen = ({ navigation, route }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [receiptNumber, setReceiptNumber] = useState('');
   const [showAccountList, setShowAccountList] = useState(false);
-  const [filterMode, setFilterMode] = useState('all'); // all | uncollected
-  const [accountFilter, setAccountFilter] = useState('all'); // all | collected | pending
+  const [filterMode, setFilterMode] = useState('all');
+  const [accountFilter, setAccountFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [summary, setSummary] = useState({ totalAmount: 0, uploaded: 0, pending: 0 });
   const [syncProgress, setSyncProgress] = useState({ uploaded: 0, total: 0, pending: 0 });
@@ -112,12 +95,7 @@ const CollectionScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     loadAccounts();
-    // Match Android CollectionFragment.onCreate(): request Bluetooth access
-    // as soon as the collection/printing screen starts, rather than waiting
-    // until the user taps Print.
     if (Platform.OS === 'android') BluetoothService.requestBluetoothPermission().catch(() => {});
-    // Refresh the receipt cloud/count automatically when a queued Android-
-    // style sync completes after the device reconnects.
     return ConnectivityService.subscribe(async () => {
       await refreshSyncProgress();
       setReceiptTransactions(await DatabaseService.getTransactions());
@@ -178,9 +156,6 @@ const CollectionScreen = ({ navigation, route }) => {
     return Number.isFinite(agreedAmount) ? agreedAmount.toFixed(2) : '';
   };
 
-  // CollectionViewModel#getTotalAmount is the sum of every receipt in the
-  // current collection.  The downloaded account rows hold that same running
-  // local total, including receipts that are still waiting to upload.
   const getCollectedTotal = () => accounts.reduce(
     (total, account) => total + (Number(account.lastCollectedAmt) || 0),
     0
@@ -196,10 +171,6 @@ const CollectionScreen = ({ navigation, route }) => {
     return maximumAmount === null ? null : Math.max(maximumAmount - getCollectedTotal(), 0);
   };
 
-  // Android's CollectionViewModel assigns account.getAgreedAmount() whenever
-  // the current account changes, then its TextWatcher immediately evaluates
-  // it against the remaining collection allowance. Keep that same feedback
-  // when Previous/Next changes the current account.
   useEffect(() => {
     if (!currentAccount || receiptNumber) return;
     const defaultAmount = getAccountDefaultAmount(currentAccount);
@@ -242,9 +213,6 @@ const CollectionScreen = ({ navigation, route }) => {
       return false;
     }
 
-    // Exact Android onAmountChanged behaviour: a receipt may only use the
-    // balance left under Validation.MaximumAmount, not merely be smaller than
-    // the configured maximum on its own.
     const remainingAmount = getRemainingAllowedAmount();
     if (remainingAmount !== null && numValue > remainingAmount) {
       setAmountError(`You can collect upto ₹${remainingAmount.toFixed(2)}`);
@@ -255,16 +223,12 @@ const CollectionScreen = ({ navigation, route }) => {
   };
 
   const canCollect = (requestedAmount = 0) => {
-    // Fresh downloads always include Validation. Retain compatibility with a
-    // pre-existing local account cache that predates this record.
     if (!validation) return true;
     const startDate = validation.StartDate ?? validation.startDate;
     const endDate = validation.EndDate ?? validation.endDate;
     const start = startDate ? new Date(startDate) : null;
     const end = endDate ? new Date(endDate) : null;
     const now = new Date();
-    // Android's isCurrentTimeBetween returns false when either configured date
-    // cannot be parsed; do not silently permit a receipt in that situation.
     if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))
       || (start && now < start) || (end && now > end)) {
       setAmountError('Current time is not allowed to make new receipts');
@@ -278,8 +242,6 @@ const CollectionScreen = ({ navigation, route }) => {
       return false;
     }
 
-    // Keep this guard separate from text-input validation so a stale UI state
-    // or a +/- tap can never create a receipt above the administrator limit.
     if (maximumAmount !== null && collectedTotal + requestedAmount > maximumAmount) {
       setAmountError(`You can collect upto ₹${Math.max(maximumAmount - collectedTotal, 0).toFixed(2)}`);
       return false;
@@ -299,8 +261,6 @@ const CollectionScreen = ({ navigation, route }) => {
     else setAmountError('');
   };
 
-  // Android uses the account's AgreedAmount as the increment/decrement step
-  // (for example 0 -> 100 -> 200), rather than changing the opening balance.
   const amountStep = Math.max(Number(currentAccount?.AgreedAmount) || 100, 0.01);
   const adjustAmount = (direction) => {
     const current = Number.parseFloat(amount) || 0;
@@ -309,9 +269,6 @@ const CollectionScreen = ({ navigation, route }) => {
       : Math.max(0, current - amountStep);
     const formatted = next.toFixed(2);
 
-    // Android's + button leaves the value unchanged when its configured cap
-    // would be exceeded. Use the remaining collection allowance here so the
-    // cap also works after earlier receipts have been collected.
     const remainingAmount = getRemainingAllowedAmount();
     if (direction > 0 && remainingAmount !== null && next > remainingAmount) {
       setAmountError(`You can collect upto ₹${remainingAmount.toFixed(2)}`);
@@ -337,9 +294,6 @@ const CollectionScreen = ({ navigation, route }) => {
         const hasLocationPermission = await LocationService.requestLocationPermission();
         if (hasLocationPermission) location = await LocationService.getCurrentLocation();
       } catch (error) {
-        // Same Android behavior: queue the collection even when a device has
-        // no GPS fix; location fields are sent as zeroes rather than blocking
-        // a receipt or losing it offline.
         console.log('Collection location unavailable:', error.message || error);
       }
 
@@ -347,7 +301,6 @@ const CollectionScreen = ({ navigation, route }) => {
       const collectedAmount = parseFloat(amount);
 
       const collectionData = {
-        // Mirrors DefaultViewModel.callUploadTran in the Android app.
         TransactionId: String(transactionNumbers.tranNumber),
         tranNumber: transactionNumbers.tranNumber,
         datewiseTranNumber: transactionNumbers.datewiseTranNumber,
@@ -364,13 +317,10 @@ const CollectionScreen = ({ navigation, route }) => {
         openingBalance: Number(currentAccount.BalanceAmount) || 0,
         syncStatus: 0,
         tranRemarks: '',
-        // Local database aliases used by the React Native cache.
         AccountId: currentAccount.AccountId,
         Amount: collectedAmount,
       };
 
-      // Match Android: save the collection and queue it before attempting the
-      // upload. The receipt is immediately usable, even without a network.
       const receiptNum = `${collectionData.tranNumber}`;
       await ApiService.queueTransactionUpload({
         ...collectionData,
@@ -412,9 +362,6 @@ const CollectionScreen = ({ navigation, route }) => {
     setAmountError('');
   };
 
-  // Matches CollectionFragment.onViewTran(): schedule the upload worker and
-  // immediately open the Receipts bottom sheet. The status icon changes from
-  // pending to uploaded when the background upload completes.
   const handleViewReceipts = async () => {
     const transactions = await DatabaseService.getTransactions();
     if (!transactions.length) {
@@ -439,17 +386,12 @@ const CollectionScreen = ({ navigation, route }) => {
   };
 
   const handleSelectContact = async () => {
-    // State updates apply on the next render, so use a ref to block a second
-    // tap immediately while the native picker is opening.
     if (isContactPickerOpenRef.current) return;
 
     isContactPickerOpenRef.current = true;
     Keyboard.dismiss();
     setIsSelectingContact(true);
     try {
-      // Android needs read access for the picker module to retrieve only the
-      // selected contact's number. iOS's CNContactPicker grants this access
-      // through the picker itself, without an app-level contacts permission.
       if (Platform.OS === 'android') {
         const permission = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
@@ -459,8 +401,6 @@ const CollectionScreen = ({ navigation, route }) => {
         }
       }
 
-      // CNContactPicker is Apple's system UI: it exposes no address-book data
-      // to the app and resolves with only the number the user selects.
       const selectedNumber = Platform.OS === 'ios'
         ? await NativeModules.PygmaContactPicker.selectPhone()
         : (await selectContactPhone())?.selectedPhone?.number;
@@ -522,18 +462,12 @@ const CollectionScreen = ({ navigation, route }) => {
     }
   };
 
-  // Android replaces the configured WAURL placeholders and opens that URL in
-  // WhatsApp. ShareSingle is the iOS equivalent (iOS cannot target Android's
-  // package intent directly).
   const handleWhatsAppReceipt = async (phoneOverride = null) => {
     if (!currentAccount) return;
     const getScalarValue = (value, preferredKeys = []) => {
       if (value === null || value === undefined) return '';
       if (typeof value !== 'object') return String(value).trim();
       for (const key of preferredKeys) {
-        // SQLite columns can be null while the downloaded account payload
-        // still has the same value under a different key (for example,
-        // `mobileNumber`). Do not let that null hide the valid value.
         if (value[key] !== undefined && value[key] !== null && String(value[key]).trim()) {
           return getScalarValue(value[key], preferredKeys);
         }
@@ -541,9 +475,6 @@ const CollectionScreen = ({ navigation, route }) => {
       const firstValue = Object.values(value).find((item) => item !== null && item !== undefined);
       return firstValue === undefined ? '' : getScalarValue(firstValue, preferredKeys);
     };
-    // Same condition as Android CollectionFragment:
-    // account.getMobileNumber().isEmpty() -> Add Phone Number; otherwise
-    // replace <<PhoneNumber>> in WAURL and launch WhatsApp.
     const mobileNumber = getScalarValue(
       phoneOverride || currentAccount.MobileNumber || currentAccount.mobileNumber,
       ['MobileNumber', 'mobileNumber', 'PhoneNumber', 'phoneNumber', 'number', 'value']
@@ -561,17 +492,8 @@ const CollectionScreen = ({ navigation, route }) => {
         .join(',');
       const template = getScalarValue(user?.WAURL, ['WAURL', 'waurl', 'url', 'value']);
       if (!template) throw new Error('WhatsApp receipt link is not configured for this society.');
-      // iOS URL routing treats a raw `+` in a query string as a space. Convert
-      // the account number to digits before inserting it, and let the
-      // configured Android WAURL's `91<<PhoneNumber>>` supply the country code
-      // when it already has one.
-      const phoneDigits = mobileNumber.replace(/\D/g, '');
-      const localPhone = phoneDigits.slice(-10);
-      const waurlIncludesCountryCode = /(?:phone|to|recipient)=[^&#]*91\s*<<PhoneNumber>>/i.test(template)
-        || /(?:\+|%2b)?91\s*<<PhoneNumber>>/i.test(template);
-      const waurlPhone = waurlIncludesCountryCode ? localPhone : `91${localPhone}`;
       const url = (template.startsWith('http://') || template.startsWith('https://') ? template : `https://${template}`)
-        .replace(/<<PhoneNumber>>/g, waurlPhone)
+        .replace(/<<PhoneNumber>>/g, mobileNumber)
         .replace(/<<LID>>/g, '1')
         .replace(/<<BID>>/g, String(user?.BankID || ''))
         .replace(/<<AID>>/g, String(currentAccount.AccountId || ''))
@@ -580,9 +502,6 @@ const CollectionScreen = ({ navigation, route }) => {
       if (/\[object object\]/i.test(url) || !/^https?:\/\//i.test(url)) {
         throw new Error('The WhatsApp receipt link is invalid. Please contact support.');
       }
-      // This is the exact WAURL handoff used by Android. It may point to the
-      // bank's WhatsApp/business endpoint, which must not be replaced with a
-      // locally composed chat message on iOS.
       console.log('WhatsApp receipt URL', {
         accountId: currentAccount.AccountId,
         mobileNumber,
@@ -611,7 +530,6 @@ const CollectionScreen = ({ navigation, route }) => {
     }
     setIsUpdatingPhone(true);
     try {
-      // Matches Android AddPhoneNumberRequest: { MobileNumber, AccountID }.
       const response = await ApiService.updatePhoneNumber({
         MobileNumber: number,
         AccountID: currentAccount.AccountId,
@@ -856,7 +774,7 @@ const CollectionScreen = ({ navigation, route }) => {
                   <Text style={styles.printActionText}>Print</Text>
                   <PrintIcon size={43} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.whatsappAction} onPress={handleWhatsAppReceipt} accessibilityLabel="Send receipt by WhatsApp">
+                <TouchableOpacity style={styles.whatsappAction} onPress={() => handleWhatsAppReceipt()} accessibilityLabel="Send receipt by WhatsApp">
                   <WhatsAppIcon size={48} />
                 </TouchableOpacity>
               </View>
@@ -1049,11 +967,13 @@ const CollectionScreen = ({ navigation, route }) => {
       </Modal>
 
       <Modal visible={showPhoneModal} transparent animationType="slide" onRequestClose={() => setShowPhoneModal(false)}>
-        <Pressable style={styles.phoneModalOverlay} onPress={() => setShowPhoneModal(false)}>
+        <View style={styles.phoneModalRoot}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowPhoneModal(false)} />
           <KeyboardAvoidingView
             style={styles.phoneModalKeyboardArea}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={0}
+            pointerEvents="box-none"
           >
           <Pressable
             style={[
@@ -1084,11 +1004,11 @@ const CollectionScreen = ({ navigation, route }) => {
             </TouchableOpacity>
           </Pressable>
           </KeyboardAvoidingView>
-        </Pressable>
+        </View>
       </Modal>
 
       <Modal visible={showPrinterPicker} transparent animationType="slide" onRequestClose={() => setShowPrinterPicker(false)}>
-        <View style={styles.phoneModalOverlay}>
+        <View style={[styles.phoneModalRoot, styles.printerModalOverlayCenter]}>
           <View style={styles.printerModalCard}>
             <Text style={styles.phoneModalTitle}>Select Receipt Printer</Text>
             <Text style={styles.printerModalHint}>Choose the connected Bluetooth printer.</Text>
@@ -1153,40 +1073,9 @@ const styles = StyleSheet.create({
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   emptyText: { fontSize: 14, color: '#808080', textAlign: 'center', marginBottom: 4 },
 
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 10,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    marginBottom: 14,
-    alignItems: 'center',
-  },
-  summaryTitle: { fontSize: 22, fontWeight: '700', color: '#FFFFFF', backgroundColor: '#7F7BF4', width: '100%', textAlign: 'center', paddingVertical: 7 },
   summaryTotalLabel: { fontSize: 12, color: '#808080', marginTop: 6 },
   summaryTotalAmount: { fontSize: 20, fontWeight: '700', color: '#000000' },
-  summaryCountsRow: { flexDirection: 'row', marginTop: 10, width: '100%', justifyContent: 'space-between' },
-  summaryBox: { alignItems: 'center', borderWidth: 2, borderColor: '#7F7BF4', borderRadius: 6, flex: 1, marginHorizontal: 3, paddingVertical: 7 },
-  summaryBoxActive: { backgroundColor: '#EEEEFF' },
-  summaryCountItem: { alignItems: 'center', borderWidth: 2, borderColor: '#7F7BF4', borderRadius: 6, flex: 1, marginHorizontal: 3, paddingVertical: 7 },
-  summaryCountValue: { fontSize: 18, fontWeight: '700', color: '#111111' },
-  summaryCountLabel: { fontSize: 16, color: '#808080', marginTop: 4 },
 
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 12,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    marginBottom: 12,
-  },
-  accountName: { fontSize: 14, fontWeight: '600', color: '#000000' },
   accountSubText: { fontSize: 12, color: '#808080', marginTop: 4 },
   divider: { height: 1, backgroundColor: '#EEEEEE', marginVertical: 10 },
 
@@ -1197,39 +1086,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F5F5F5',
   },
-  detailLabel: { fontSize: 13, color: '#808080' },
-  detailValue: { fontSize: 13, color: '#000000', fontWeight: '600' },
 
   amountLabel: { fontSize: 14, color: '#000000', marginBottom: 6 },
-  amountControlRow: { flexDirection: 'row', alignItems: 'stretch', width: '100%' },
-  amountAdjustButton: {
-    width: 70,
-    backgroundColor: '#7F7BF4',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 64,
-  },
-  amountAdjustText: { color: '#FFFFFF', fontSize: 28, fontWeight: '600' },
-  amountInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#808080',
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 18,
-    color: '#000000',
-  },
-  amountInputError: { borderColor: '#FF0000' },
-  errorText: { color: '#FF0000', fontSize: 12, marginTop: 4 },
 
-  primaryButton: {
-    backgroundColor: '#7F7BF4',
-    borderRadius: 24,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 14,
-  },
+  amountInputError: { borderColor: '#FF0000' },
+
   primaryButtonSmall: {
     backgroundColor: '#7F7BF4',
     borderRadius: 15,
@@ -1238,7 +1099,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonDisabled: { opacity: 0.5 },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 
   outlineButton: {
     backgroundColor: '#FFFFFF',
@@ -1268,7 +1128,6 @@ const styles = StyleSheet.create({
     color: '#006400',
     marginBottom: 8,
   },
-  receiptNumber: { fontSize: 16, fontWeight: '700', color: '#000000', marginBottom: 16 },
   receiptButtonsRow: { flexDirection: 'row', gap: 10 },
 
   navRow: {
@@ -1284,13 +1143,6 @@ const styles = StyleSheet.create({
   navButtonDisabled: { opacity: 0.3 },
   navButtonText: { color: '#7F7BF4', fontSize: 14, fontWeight: '600' },
   navPosition: { fontSize: 13, color: '#808080' },
-  dashboardFooterButton: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#7F7BF4', borderRadius: 32, paddingHorizontal: 28, paddingVertical: 10, marginBottom: 12 },
-  dashboardFooterIcon: { color: '#7F7BF4', fontSize: 26, marginRight: 10 },
-  dashboardFooterText: { color: '#7F7BF4', fontSize: 18, fontWeight: '700' },
-  referenceBottomNav: { position: 'absolute', left: 28, right: 28, bottom: 8, borderTopWidth: 2, borderTopColor: '#7F7BF4', backgroundColor: '#C8C6FF', flexDirection: 'row', justifyContent: 'space-around', paddingTop: 8 },
-  referenceNavItem: { alignItems: 'center', minWidth: 80 },
-  referenceNavIcon: { color: '#111111', fontSize: 28, lineHeight: 30 },
-  referenceNavLabel: { color: '#111111', fontSize: 16, fontWeight: '600' },
 
   modalContainer: { flex: 1, backgroundColor: '#F8FAFC', marginTop: 220, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
   modalHeader: {
@@ -1355,11 +1207,11 @@ const styles = StyleSheet.create({
   keyboardArea: { flex: 1 },
   screenContent: { flex: 1 },
   screenContentContainer: { paddingTop: 10, paddingBottom: 24 },
-  summaryCard: { backgroundColor: '#fff', borderRadius: 16, padding: 10, elevation: 4, shadowColor: '#163B57', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.16, shadowRadius: 5, marginBottom: 14 },
+  summaryCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, elevation: 4, shadowColor: '#163B57', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.16, shadowRadius: 5, marginBottom: 14 },
   summaryTitle: { fontSize: 18, fontWeight: '700', color: '#fff', backgroundColor: '#2874B2', width: '100%', textAlign: 'center', paddingVertical: 10, borderRadius: 10 },
   summaryCountsRow: { flexDirection: 'row', marginTop: 10, width: '100%' },
-  summaryBox: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 10, flex: 1, marginHorizontal: 4, paddingVertical: 8 },
-  summaryCountItem: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 10, flex: 1, marginHorizontal: 4, paddingVertical: 8 },
+  summaryBox: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 10, flex: 1, marginHorizontal: 6, paddingVertical: 8 },
+  summaryCountItem: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 10, flex: 1, marginHorizontal: 6, paddingVertical: 8 },
   summaryBoxActive: { backgroundColor: '#EAF2F7', borderColor: '#2874B2' },
   summaryCountValue: { fontSize: 20, fontWeight: '700', color: '#111' },
   summaryCountLabel: { fontSize: 13, color: '#657789', marginTop: 4 },
@@ -1384,6 +1236,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 9,
   },
+  printerModalOverlayCenter: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
   accountHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 13 },
   avatar: { width: 56, height: 56, borderRadius: 28, borderWidth: 0, backgroundColor: '#2874B2', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   avatarText: { color: '#fff', fontSize: 19, fontWeight: '700' },
@@ -1396,15 +1249,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     marginTop: 2,
     paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: '#E3ECF2',
   },
   detailCell: { width: '50%', minHeight: 58, paddingRight: 12, paddingBottom: 14, alignItems: 'flex-start' },
   detailCellRight: { paddingLeft: 14, paddingRight: 0, borderLeftWidth: 1, borderLeftColor: '#E3ECF2' },
-  schemeCell: { width: '100%', paddingTop: 2, paddingBottom: 7, borderTopWidth: 1, borderTopColor: '#E3ECF2' },
+  schemeCell: { width: '100%', paddingTop: 2, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#E3ECF2' },
   detailValue: { width: '100%', fontSize: 15, fontWeight: '800', color: '#17324D', marginBottom: 5, textAlign: 'left' },
   detailLabel: { width: '100%', fontSize: 12, color: '#718395', textAlign: 'left' },
-  collectionSection: { paddingTop: 2 },
+  collectionSection: { paddingTop: 18 },
   amountControlRow: { flexDirection: 'row', alignItems: 'center', width: '100%' },
   amountAdjustButton: { width: 56, height: 64, backgroundColor: '#2874B2', alignItems: 'center', justifyContent: 'center' },
   amountAdjustText: { color: '#fff', fontSize: 28, fontWeight: '600' },
@@ -1415,24 +1266,23 @@ const styles = StyleSheet.create({
   currencyPrefix: { fontSize: 21, color: '#9AAAB7', fontWeight: '700', marginRight: 6 },
   currencyPrefixHighlighted: { color: '#2874B2' },
   amountInput: { flex: 1, fontSize: 20, color: '#17324D', padding: 0, paddingRight: 30 },
-  amountInputError: { borderColor: '#D84343' },
   amountErrorIcon: { position: 'absolute', right: 18, top: 24, width: 28, height: 28, borderRadius: 14, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', backgroundColor: '#B00020', color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
   errorText: { color: '#B00020', fontSize: 16, fontWeight: '700', textAlign: 'center', marginTop: 10 },
   primaryButton: { backgroundColor: '#2874B2', borderRadius: 10, minHeight: 52, paddingVertical: 14, alignItems: 'center', marginTop: 18, elevation: 2 },
   primaryButtonText: { color: '#fff', fontSize: 20, letterSpacing: 1.4, fontWeight: '700' },
-  receiptSection: { paddingTop: 5 },
+  receiptSection: { paddingTop: 18 },
   successText: { color: '#08791B', fontSize: 20, fontWeight: '800', marginBottom: 9 },
   receiptNumber: { fontSize: 17, fontWeight: '600', color: '#808080', marginBottom: 15 },
   receiptAction: { height: 86, borderWidth: 2, borderColor: '#8A86F6', borderRadius: 23, flexDirection: 'row', overflow: 'hidden' },
   printAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 25 },
   printActionText: { color: '#7F7BF4', fontSize: 22, fontWeight: '700' },
   whatsappAction: { width: 76, alignItems: 'center', justifyContent: 'center' },
-  navRow: { display: 'none' },
   referenceBottomNav: { marginHorizontal: 28, marginTop: 10, borderTopWidth: 2, borderTopColor: '#918EF3', backgroundColor: 'transparent', flexDirection: 'row', justifyContent: 'space-around', paddingTop: 7, paddingBottom: 10 },
+  referenceNavItem: { alignItems: 'center', minWidth: 80 },
   referenceNavIcon: { color: '#111', fontSize: 30, fontWeight: '700', lineHeight: 32 },
   referenceNavLabel: { color: '#17324D', fontSize: 13, fontWeight: '700' },
-  phoneModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  phoneModalKeyboardArea: { flex: 1, width: '100%', justifyContent: 'flex-end' },
+  phoneModalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
+  phoneModalKeyboardArea: { position: 'absolute', left: 0, right: 0, bottom: 0, justifyContent: 'flex-end' },
   phoneModalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24, maxHeight: '90%' },
   phoneModalCardAboveKeyboard: { marginBottom: 28 },
   phoneModalHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: '#D4D4D4', marginBottom: 18 },
