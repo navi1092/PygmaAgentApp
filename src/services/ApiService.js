@@ -154,6 +154,10 @@ const normalizeAgent = (value) => {
     AgentImageLink: ['agentimagelink'], BankImageLink: ['bankimagelink'],
     CollectionStatus: ['collectionstatus'], SettledConfirmed: ['settledconfirmed'],
     SettledUnconfirmed: ['settledunconfirmed'],
+    TitleBackColor: ['titlebackcolor'], TitleForeColor: ['titleforecolor'],
+    BackColor: ['backcolor'], ForeColor: ['forecolor'],
+    EnabledButtonBackColor: ['enabledbuttonbackcolor'],
+    DisabledButtonForeColor: ['disabledbuttonforecolor'],
   };
   const normalized = { ...value };
   for (const [target, keys] of Object.entries(aliases)) {

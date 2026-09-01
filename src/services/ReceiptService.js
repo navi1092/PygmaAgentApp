@@ -99,11 +99,21 @@ export const createReceiptText = ({ user, account, transactions }) => {
 };
 
 const getPrinterDevice = async (address = null) => {
-  const devices = await BluetoothService.getAvailableDevices();
+  const [bondedDevices, connectedDevices] = await Promise.all([
+    BluetoothService.getAvailableDevices(),
+    BluetoothService.getConnectedDevices(),
+  ]);
+  const deviceKey = (item) => item?.address || item?.id;
+  const devices = [...connectedDevices, ...bondedDevices].filter((device, index, list) =>
+    index === list.findIndex((candidate) => deviceKey(candidate) === deviceKey(device))
+  );
   const savedAddress = address || await AsyncStorage.getItem(PRINTER_ADDRESS_KEY);
+  const savedDevice = savedAddress ? devices.find((item) => deviceKey(item) === savedAddress) : null;
   return {
     devices,
-    device: savedAddress ? devices.find((item) => item.address === savedAddress) : null,
+    // Reuse the app-selected printer first. If this native session already has
+    // exactly one open Bluetooth socket, it is safe to print there directly.
+    device: savedDevice || (connectedDevices.length === 1 ? connectedDevices[0] : null),
   };
 };
 
@@ -111,7 +121,7 @@ const printToDevice = async (device, text) => {
   if (!device) throw new Error('Select a receipt printer first.');
   if (!(await device.isConnected())) await device.connect();
   await device.write(text, 'utf8');
-  await AsyncStorage.setItem(PRINTER_ADDRESS_KEY, device.address);
+  await AsyncStorage.setItem(PRINTER_ADDRESS_KEY, device.address || device.id);
 };
 
 const ReceiptService = {
@@ -127,7 +137,13 @@ const ReceiptService = {
     }
     const { devices, device } = await getPrinterDevice(printerAddress);
     if (!device) return { needsPrinterSelection: true, devices };
-    await printToDevice(device, createReceiptText(receipt));
+    try {
+      await printToDevice(device, createReceiptText(receipt));
+    } catch (error) {
+      // Match the Android app: if reconnecting to the remembered printer
+      // fails, fall back to device selection/discovery instead of stopping.
+      return { needsPrinterSelection: true, devices };
+    }
     return { printed: true };
   },
 
@@ -137,8 +153,13 @@ const ReceiptService = {
       return;
     }
     const { devices } = await getPrinterDevice();
-    const device = devices.find((item) => item.address === printerAddress);
-    if (!device) throw new Error('The selected printer is unavailable. Turn it on and try again.');
+    let device = devices.find((item) => (item.address || item.id) === printerAddress);
+    if (!device) {
+      // A device returned by active discovery may not be bonded yet. Connecting
+      // by address mirrors the Android selection flow and returns a writable
+      // BluetoothDevice instance when pairing/connection succeeds.
+      device = await BluetoothService.connectToDevice(printerAddress);
+    }
     await printToDevice(device, createReceiptText(receipt));
   },
 };

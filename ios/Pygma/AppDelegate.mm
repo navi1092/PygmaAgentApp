@@ -5,6 +5,39 @@
 #import <Contacts/Contacts.h>
 #import <ContactsUI/ContactsUI.h>
 #import <CoreBluetooth/CoreBluetooth.h>
+#import <UserNotifications/UserNotifications.h>
+
+@interface PygmaNotificationPermission : NSObject <RCTBridgeModule>
+@end
+
+@implementation PygmaNotificationPermission
+
+RCT_EXPORT_MODULE(PygmaNotificationPermission);
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+RCT_REMAP_METHOD(requestPermission,
+                 requestPermissionWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject)
+{
+  UNAuthorizationOptions options = UNAuthorizationOptionAlert |
+                                   UNAuthorizationOptionSound |
+                                   UNAuthorizationOptionBadge;
+  [[UNUserNotificationCenter currentNotificationCenter]
+      requestAuthorizationWithOptions:options
+      completionHandler:^(BOOL granted, NSError *error) {
+        if (error != nil) {
+          reject(@"E_NOTIFICATION_PERMISSION", error.localizedDescription, error);
+          return;
+        }
+        resolve(@(granted));
+      }];
+}
+
+@end
 
 @interface PygmaContactPicker : NSObject <RCTBridgeModule, CNContactPickerDelegate>
 @property(nonatomic, copy) RCTPromiseResolveBlock resolve;

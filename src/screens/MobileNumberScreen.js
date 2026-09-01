@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
-  Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
+  NativeModules,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,8 @@ import uuid from 'react-native-uuid';
 import ApiService from '../services/ApiService';
 import LocationService from '../services/LocationService';
 import WelcomeIllustration from '../assets/images/WelcomeIllustration';
+import ErrorDialog from '../components/ErrorDialog';
+import AppPermissionService from '../services/AppPermissionService';
 
 // Matches fragment_mobile_number.xml exactly:
 // title="Register" (TextBig=16sp) -> subTitle="Welcome to Pygma" (TextNormal=14sp, black)
@@ -31,14 +33,15 @@ const MobileNumberScreen = ({ navigation }) => {
   const [mobileNumber, setMobileNumber] = useState('');
   const [isTncChecked, setIsTncChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showError, setShowError] = useState(false);
 
   useEffect(() => {
-    const requestLoginPermissions = async () => {
-      try {
-        await LocationService.requestLocationPermission();
-      } catch (error) {}
-    };
-    requestLoginPermissions();
+    // The legacy Android app explains and requests phone, location and
+    // notification access when its registration screen first opens.
+    AppPermissionService.requestStartupPermissions().catch((error) => {
+      console.warn('Startup permission request failed:', error);
+    });
   }, []);
 
   const isFormValid = mobileNumber.length === 10 && isTncChecked;
@@ -69,7 +72,10 @@ const MobileNumberScreen = ({ navigation }) => {
       }
       await AsyncStorage.setItem('deviceId', String(registration.deviceId));
 
-      const response = await ApiService.sendOtp(mobileNumber);
+      const appHashKey = Platform.OS === 'android'
+        ? await NativeModules.PygmaOtpRetriever?.getAppHash().catch(() => '')
+        : '';
+      const response = await ApiService.sendOtp(mobileNumber, appHashKey || '');
       if (response.success && response.otpId !== null) {
         console.log('OTP ID received from getotp:', response.otpId);
         await AsyncStorage.setItem('userPhone', mobileNumber.trim());
@@ -78,12 +84,15 @@ const MobileNumberScreen = ({ navigation }) => {
           otpId: response.otpId,
         });
       } else if (response.success) {
-        Alert.alert('Error', 'Could not start an OTP session. Please request a new OTP.');
+        setErrorMessage('Could not start an OTP session. Please request a new OTP.');
+        setShowError(true);
       } else {
-        Alert.alert('Error', response.message || 'Failed to send OTP');
+        setErrorMessage(response.message || 'Failed to send OTP');
+        setShowError(true);
       }
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+      setErrorMessage(error.message || 'Failed to send OTP. Please try again.');
+      setShowError(true);
     } finally {
       setIsLoading(false);
     }
@@ -153,6 +162,7 @@ const MobileNumberScreen = ({ navigation }) => {
           )}
         </TouchableOpacity>
       </ScrollView>
+      <ErrorDialog visible={showError} message={errorMessage} onClose={() => setShowError(false)} />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );

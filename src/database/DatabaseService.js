@@ -129,20 +129,29 @@ const DatabaseService = {
     try {
       await db.executeSql(
         `INSERT OR REPLACE INTO accounts (
-          AccountId, AccountNumber, CustomerCode, AccountName, AccountAddress,
-          MobileNumber, AgreedAmount, BalanceAmount, SchemeName,
-          LocationX, LocationY, data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          PositionIndex, AccountId, AccountNumber, CustomerCode, AccountName,
+          AccountAddress, MobileNumber, AgreedAmount, OpeningDate, LastTranDate,
+          BalanceAmount, LeanAccountNumber, LeanAmount, SchemeCode, SchemeName,
+          SearchKey, collectionCount, LocationX, LocationY, data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          account.PositionIndex ?? account.positionIndex ?? null,
           account.AccountId,
           account.AccountNumber || null,
           account.CustomerCode || null,
           account.AccountName || null,
           account.AccountAddress || null,
           account.MobileNumber || null,
-          account.AgreedAmount || 0,
-          account.BalanceAmount || 0,
+          account.AgreedAmount ?? 0,
+          account.OpeningDate || null,
+          account.LastTranDate || null,
+          account.BalanceAmount ?? 0,
+          account.LeanAccountNumber || null,
+          account.LeanAmount ?? 0,
+          account.SchemeCode || null,
           account.SchemeName || null,
+          account.SearchKey || null,
+          account.CollectionCount ?? account.collectionCount ?? 0,
           account.locationX ?? account.LocationX ?? account.latitude ?? account.Latitude ?? 0,
           account.locationY ?? account.LocationY ?? account.longitude ?? account.Longitude ?? 0,
           JSON.stringify(account),
@@ -156,15 +165,35 @@ const DatabaseService = {
 
   getAccounts: async () => {
     try {
-      const result = await db.executeSql('SELECT * FROM accounts ORDER BY AccountName');
+      const result = await db.executeSql(
+        'SELECT * FROM accounts ORDER BY CASE WHEN PositionIndex IS NULL THEN 1 ELSE 0 END, PositionIndex, AccountName'
+      );
       const accounts = [];
       for (let i = 0; i < result[0].rows.length; i++) {
         const row = result[0].rows.item(i);
         const rawAccount = JSON.parse(row.data || '{}');
-        const account = {
-          ...rawAccount,
-          ...row,
-        };
+        // Older app versions only populated a subset of the SQL columns. Do
+        // not let their null columns hide complete values retained in `data`.
+        const account = { ...rawAccount, ...row };
+        [
+          'PositionIndex', 'AccountNumber', 'CustomerCode', 'AccountName',
+          'AccountAddress', 'AgreedAmount', 'OpeningDate', 'LastTranDate',
+          'BalanceAmount', 'LeanAccountNumber', 'LeanAmount', 'SchemeCode',
+          'SchemeName', 'SearchKey',
+        ].forEach((field) => {
+          // These values belong to the downloaded API snapshot. In particular,
+          // collecting locally must not change BalanceAmount/LastTranDate.
+          if (rawAccount[field] !== null && rawAccount[field] !== undefined) {
+            account[field] = rawAccount[field];
+          }
+        });
+        // MobileNumber is deliberately SQL-first because the user can edit it
+        // locally through Agent/updatemobilenumber.
+        account.MobileNumber = row.MobileNumber ?? rawAccount.MobileNumber;
+        account.collectionCount = Math.max(
+          Number(row.collectionCount) || 0,
+          Number(rawAccount.CollectionCount ?? rawAccount.collectionCount) || 0
+        );
         const latitude = [
           rawAccount.locationX,
           rawAccount.LocationX,
@@ -192,11 +221,11 @@ const DatabaseService = {
     }
   },
 
-  markAccountCollected: async (accountId, amount, receiptNumber, date = new Date().toISOString()) => {
+  markAccountCollected: async (accountId, amount, receiptNumber) => {
     try {
       await db.executeSql(
-        `UPDATE accounts SET collectionCount = COALESCE(collectionCount, 0) + 1, BalanceAmount = COALESCE(BalanceAmount, 0) + ?, lastCollectedAmt = COALESCE(lastCollectedAmt, 0) + ?, lastReceipt = ?, LastTranDate = ? WHERE AccountId = ?`,
-        [amount || 0, amount || 0, receiptNumber || 0, date, accountId]
+        `UPDATE accounts SET collectionCount = COALESCE(collectionCount, 0) + 1, lastCollectedAmt = COALESCE(lastCollectedAmt, 0) + ?, lastReceipt = ? WHERE AccountId = ?`,
+        [amount || 0, receiptNumber || 0, accountId]
       );
     } catch (error) {
       console.log('Error updating collected account:', error);

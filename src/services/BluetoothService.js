@@ -19,12 +19,13 @@ const BluetoothService = {
     // BLUETOOTH_CONNECT and BLUETOOTH_SCAN are runtime permissions only on
     // Android 12 (API 31) and newer. Earlier Android versions grant the
     // manifest permissions at install time.
-    if (Number(Platform.Version) < 31) return true;
     try {
-      const permissions = [
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-      ];
+      const permissions = Number(Platform.Version) >= 31
+        ? [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        ]
+        : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
       const granted = await PermissionsAndroid.requestMultiple(permissions);
       return permissions.every((permission) => granted[permission] === PermissionsAndroid.RESULTS.GRANTED);
     } catch (error) {
@@ -44,6 +45,29 @@ const BluetoothService = {
     }
   },
 
+  requestBluetoothEnabled: async () => {
+    const bluetooth = getBluetoothClassic();
+    if (!bluetooth) return false;
+    if (await BluetoothService.isBluetoothEnabled()) return true;
+    try {
+      return Boolean(await bluetooth.requestBluetoothEnabled());
+    } catch (error) {
+      console.log('Bluetooth enable request failed:', error);
+      return false;
+    }
+  },
+
+  getConnectedDevices: async () => {
+    const bluetooth = getBluetoothClassic();
+    if (!bluetooth) return [];
+    try {
+      return (await bluetooth.getConnectedDevices()) || [];
+    } catch (error) {
+      console.log('Error getting connected devices:', error);
+      return [];
+    }
+  },
+
   getAvailableDevices: async () => {
     const bluetooth = getBluetoothClassic();
     if (!bluetooth) return [];
@@ -51,6 +75,18 @@ const BluetoothService = {
       return (await bluetooth.getBondedDevices()) || [];
     } catch (error) {
       console.log('Error getting devices:', error);
+      return [];
+    }
+  },
+
+  discoverDevices: async () => {
+    const bluetooth = getBluetoothClassic();
+    if (!bluetooth || Platform.OS !== 'android') return [];
+    try {
+      await bluetooth.cancelDiscovery().catch(() => {});
+      return (await bluetooth.startDiscovery()) || [];
+    } catch (error) {
+      console.log('Error discovering Bluetooth devices:', error);
       return [];
     }
   },

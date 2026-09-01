@@ -17,6 +17,8 @@ import ApiService from '../services/ApiService';
 import DatabaseService from '../database/DatabaseService';
 import ConnectivityService from '../services/ConnectivityService';
 import Svg, { Path } from 'react-native-svg';
+import ErrorDialog from '../components/ErrorDialog';
+import { getPrimaryColor } from '../utils/theme';
 
 // Matches Android drawable/ic_call.xml used beside the bank contact number.
 const BankCallIcon = () => (
@@ -53,6 +55,10 @@ const DashboardScreen = ({ navigation }) => {
   const [showSubmitSheet, setShowSubmitSheet] = useState(false);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [submittedSummary, setSubmittedSummary] = useState({ amount: 0, transactions: 0 });
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showError, setShowError] = useState(false);
+  const [showDownloadSuccess, setShowDownloadSuccess] = useState(false);
+  const [downloadedAccountCount, setDownloadedAccountCount] = useState(0);
   const resolveImageUrl = (value) => {
     if (!value || typeof value !== 'string') return null;
     const link = value.trim();
@@ -112,7 +118,6 @@ const DashboardScreen = ({ navigation }) => {
       const currentValidation = await DatabaseService.getLatestValidation();
       setHasDownloadedAccounts(accounts.length > 0);
       setValidation(currentValidation);
-      setPendingUploadCount(await ApiService.getPendingTransactionCount());
       const apiCollectionStatus = Number(userData?.CollectionStatus) || 0;
       // The server is authoritative for Live/Submitted. Downloading accounts
       // is the only local transition (Open -> downloaded/Open); local
@@ -124,21 +129,37 @@ const DashboardScreen = ({ navigation }) => {
       const confirmedAmount = Number(userData?.SettledConfirmed) || 0;
       const pendingAmount = Number(userData?.SettledUnconfirmed) || 0;
       const localAmount = transactions.reduce((total, transaction) => total + (Number(transaction.Amount) || 0), 0);
-      const collectedAccounts = accounts.filter((account) => Number(account.lastCollectedAmt) > 0).length;
+      // Android's Submitted/Live card uses TransactionDao.getTotalCollection,
+      // which represents only the active local collection. Settlement amounts
+      // belong to the separate monthly summary calculation. Do not surface an
+      // orphaned transaction amount when no account cycle is downloaded/live.
+      const currentCycleAmount = accounts.length > 0 || apiCollectionStatus === 2
+        ? localAmount
+        : 0;
+      const pendingTransactions = transactions.filter((transaction) =>
+        Number(transaction.syncStatus ?? transaction.SyncStatus) === 0
+      ).length;
+      const uploadedTransactions = Math.max(transactions.length - pendingTransactions, 0);
+      setPendingUploadCount(pendingTransactions);
+      const collectedAccounts = accounts.filter((account) =>
+        Number(account.collectionCount ?? account.CollectionCount) > 0
+      ).length;
       setSummary({
-        // This card is the active collection total: only amounts from the
-        // receipts saved on this device/session. SettledConfirmed and
-        // SettledUnconfirmed are server settlement/history figures and must
-        // not make a newly started collection appear to have money collected.
-        totalCollections: localStatus === 2 ? localAmount : 0,
+        // Matches DashboardViewModel.refreshCalculations(): confirmed and
+        // unconfirmed server settlements plus the local collection amount.
+        totalCollections: confirmedAmount + pendingAmount + localAmount,
         confirmedAmount,
         pendingAmount,
-        pendingSubmit: localAmount,
+        pendingSubmit: currentCycleAmount,
+        totalTransactions: transactions.length,
+        uploadedTransactions,
+        pendingTransactions,
         collectedAccounts,
         totalAccounts: accounts.length,
       });
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to load dashboard data');
+      setErrorMessage(error.message || 'Failed to load dashboard data');
+      setShowError(true);
     } finally {
       setIsLoading(false);
     }
@@ -167,7 +188,8 @@ const DashboardScreen = ({ navigation }) => {
             await ApiService.logout();
             navigation.reset({ index: 0, routes: [{ name: 'MobileNumber' }] });
           } catch (error) {
-            Alert.alert('Error', 'Failed to logout');
+            setErrorMessage('Failed to logout');
+            setShowError(true);
           }
         },
       },
@@ -195,9 +217,11 @@ const DashboardScreen = ({ navigation }) => {
         collectedAccounts: 0,
         totalAccounts: accountsResponse.data.length,
       }));
-      Alert.alert('Success', `${accountsResponse.data.length} accounts downloaded successfully`);
+      setDownloadedAccountCount(accountsResponse.data.length);
+      setShowDownloadSuccess(true);
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to download accounts');
+      setErrorMessage(error.message || 'Failed to download accounts');
+      setShowError(true);
     } finally {
       setIsLoading(false);
     }
@@ -244,7 +268,8 @@ const DashboardScreen = ({ navigation }) => {
       setCollectionStatus(serverStatus);
       navigation.navigate('Collection');
     } catch (error) {
-      Alert.alert('Error', error.message || 'Unable to start collection. Please try again.');
+      setErrorMessage(error.message || 'Unable to start collection. Please try again.');
+      setShowError(true);
     } finally {
       setIsLoading(false);
     }
@@ -297,7 +322,8 @@ const DashboardScreen = ({ navigation }) => {
     } catch (error) {
       // Android never queues submitcollection: it keeps the local collection
       // open until every transaction is uploaded and submit succeeds.
-      Alert.alert('Submit failed', error.message || 'Unable to submit collection. Please try again when online.');
+      setErrorMessage(error.message || 'Unable to submit collection. Please try again when online.');
+      setShowError(true);
     }
   };
 
@@ -308,6 +334,7 @@ const DashboardScreen = ({ navigation }) => {
 
   const bankImageUrl = resolveImageUrl(user?.BankImageLink || user?.bankImageLink);
   const agentImageUrl = resolveImageUrl(user?.AgentImageLink || user?.agentImageLink);
+  const primaryColor = getPrimaryColor(user);
   // Android enables Continue and Submit in the Live state when the server's
   // validation limits are valid. Older local installs do not have that record,
   // so retain the requested Collect/Submit flow until the next download.
@@ -319,9 +346,9 @@ const DashboardScreen = ({ navigation }) => {
   if (isLoading && !user) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#7F7BF4" />
+        <StatusBar barStyle="light-content" backgroundColor={primaryColor} />
         <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#2874B2" />
+          <ActivityIndicator size="large" color={primaryColor} />
         </View>
       </View>
     );
@@ -329,13 +356,14 @@ const DashboardScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#2874B2" />
+      <StatusBar barStyle="light-content" backgroundColor={primaryColor} />
 
       {/* rootLayout - bg_top_mask: blue block, 60dp bottom-rounded corners */}
       <View style={[styles.topMask, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 20) }]}>
         <View
           style={[
             styles.bankRow,
+            { backgroundColor: primaryColor },
             { marginTop: -insets.top, paddingTop: insets.top + 28 },
           ]}
         >
@@ -358,6 +386,21 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         </View>
 
+        <Modal visible={showDownloadSuccess} transparent animationType="fade" onRequestClose={() => setShowDownloadSuccess(false)}>
+          <View style={styles.dialogOverlay}>
+            <View style={styles.successDialog}>
+              <View style={styles.dialogBrandRow}>
+                <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
+                <Text style={styles.dialogBrand}>Pygma</Text>
+              </View>
+              <Text style={styles.dialogMessage}>{downloadedAccountCount} accounts downloaded successfully</Text>
+              <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowDownloadSuccess(false)}>
+                <Text style={styles.dialogOkayText}>Okay</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         <Modal visible={showSubmitSuccess} transparent animationType="fade" onRequestClose={() => setShowSubmitSuccess(false)}>
           <View style={styles.dialogOverlay}>
             <View style={styles.successDialog}>
@@ -366,12 +409,14 @@ const DashboardScreen = ({ navigation }) => {
                 <Text style={styles.dialogBrand}>Pygma</Text>
               </View>
               <Text style={styles.dialogMessage}>Collection submitted successfully{`\n`}Total Amount {formatINR(submittedSummary.amount)}{`\n`}Total Transactions {submittedSummary.transactions}</Text>
-              <TouchableOpacity style={styles.dialogOkay} onPress={() => setShowSubmitSuccess(false)}>
+              <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowSubmitSuccess(false)}>
                 <Text style={styles.dialogOkayText}>Okay</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Modal>
+
+        <ErrorDialog visible={showError} message={errorMessage} primaryColor={primaryColor} onClose={() => setShowError(false)} />
 
         <Modal visible={showSubmitSheet} transparent animationType="slide" onRequestClose={() => setShowSubmitSheet(false)}>
           <View style={styles.sheetOverlay}>
@@ -392,7 +437,7 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.sheetLine}>Total Account    <Text style={styles.sheetValue}>{summary?.totalAccounts || 0}</Text></Text>
               <Text style={styles.sheetLine}>Collected        <Text style={styles.sheetValue}>{summary?.collectedAccounts || 0}</Text></Text>
               <Text style={styles.sheetLine}>Pending          <Text style={styles.sheetValue}>{(summary?.totalAccounts || 0) - (summary?.collectedAccounts || 0)}</Text></Text>
-              <TouchableOpacity style={styles.sheetSubmitButton} onPress={confirmSubmitCollection}>
+              <TouchableOpacity style={[styles.sheetSubmitButton, { backgroundColor: primaryColor }]} onPress={confirmSubmitCollection}>
                 <Text style={styles.primaryButtonText}>Submit {formatINR(summary?.totalCollections)}</Text>
               </TouchableOpacity>
             </View>
@@ -402,11 +447,11 @@ const DashboardScreen = ({ navigation }) => {
         <ScrollView
           style={styles.scrollArea}
           refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#7F7BF4" />
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={primaryColor} />
           }
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.card}>
+          <View style={[styles.card, { shadowColor: primaryColor }]}>
             <View style={styles.userSection}>
               <Image
                 style={styles.userImage}
@@ -418,18 +463,20 @@ const DashboardScreen = ({ navigation }) => {
               <Text style={styles.userName}>{user?.AgentName || ''}</Text>
               <Text style={styles.userIdRow}>ID #{user?.AgentID || ''} | {user?.MobileNumber || ''}</Text>
             </View>
-            <Text style={styles.statusStrip}>
-              {collectionStatus < 2 ? 'Open' : collectionStatus === 2 ? 'Live' : 'Submitted'}
-            </Text>
-            <View style={styles.bottomStatsRow}>
-              <View style={styles.bottomStatItem}>
-                <Text style={styles.statValue}>{formatINR(summary?.totalCollections)}</Text>
-                <Text style={styles.statLabelSmall}>Amount</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.bottomStatItem}>
-                <Text style={styles.statValue}>{summary?.collectedAccounts || 0}/{summary?.totalAccounts || 0}</Text>
-                <Text style={styles.statLabelSmall}>Accounts</Text>
+            <View style={[styles.transactionSummary, { borderColor: primaryColor }]}>
+              <Text style={[styles.statusStrip, { backgroundColor: primaryColor }]}>
+                {collectionStatus < 2 ? 'Open' : collectionStatus === 2 ? 'Live' : 'Submitted'}
+              </Text>
+              <View style={styles.bottomStatsRow}>
+                <View style={styles.bottomStatItem}>
+                  <Text style={styles.statValue}>{formatINR(summary?.pendingSubmit)}</Text>
+                  <Text style={styles.statLabelSmall}>Amount</Text>
+                </View>
+                <View style={[styles.statDivider, { backgroundColor: primaryColor, shadowColor: primaryColor }]} />
+                <View style={styles.bottomStatItem}>
+                  <Text style={styles.statValue}>{summary?.collectedAccounts || 0}/{summary?.totalAccounts || 0}</Text>
+                  <Text style={styles.statLabelSmall}>Accounts</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -440,7 +487,7 @@ const DashboardScreen = ({ navigation }) => {
           {/* Android hides Download only during a live collection. A submitted
               collection must show Download so the next collection can begin. */}
           {collectionStatus !== 2 && (
-            <TouchableOpacity style={styles.primaryButton} onPress={handleDownloadAccounts}>
+            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: primaryColor }]} onPress={handleDownloadAccounts}>
               <Text style={styles.primaryButtonText}>
                 {collectionStatus === 3 ? 'Download' : (hasDownloadedAccounts ? 'Download Again' : 'Download')}
               </Text>
@@ -448,24 +495,24 @@ const DashboardScreen = ({ navigation }) => {
           )}
           {collectionStatus < 2 && hasDownloadedAccounts
             && Number(validation?.LastRefreshTimeFlag ?? validation?.lastRefreshTimeFlag ?? 0) === 0 && (
-            <TouchableOpacity style={styles.outlineButton} onPress={handleStartCollection}>
-              <Text style={styles.outlineButtonText}>Collect</Text>
+            <TouchableOpacity style={[styles.outlineButton, { borderColor: primaryColor }]} onPress={handleStartCollection}>
+              <Text style={[styles.outlineButtonText, { color: primaryColor }]}>Collect</Text>
             </TouchableOpacity>
           )}
           {collectionStatus === 2 && hasValidCollectionLimits && (
             <>
-              <TouchableOpacity style={styles.primaryButton} onPress={handleContinueCollection}>
+              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: primaryColor }]} onPress={handleContinueCollection}>
                 <Text style={styles.primaryButtonText}>Collect</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.outlineButton} onPress={handleSubmitCollection}>
-                <Text style={styles.outlineButtonText}>Submit</Text>
+              <TouchableOpacity style={[styles.outlineButton, { borderColor: primaryColor }]} onPress={handleSubmitCollection}>
+                <Text style={[styles.outlineButtonText, { color: primaryColor }]}>Submit</Text>
               </TouchableOpacity>
             </>
           )}
 
           <View style={styles.poweredByRow}>
             <Text style={styles.poweredByLabel}>Powered By </Text>
-            <Text style={styles.poweredByValue}>UNIGS Pygma</Text>
+            <Text style={[styles.poweredByValue, { color: primaryColor }]}>UNIGS Pygma</Text>
           </View>
         </View>
       </View>
@@ -591,12 +638,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     paddingVertical: 7,
-    marginTop: 18,
+  },
+  transactionSummary: {
+    marginTop: 14,
+    borderWidth: 2,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    overflow: 'hidden',
   },
   statDivider: {
-    width: 1,
-    height: 52,
-    backgroundColor: '#A9A7F8',
+    width: 1.5,
+    alignSelf: 'stretch',
+    marginVertical: 2,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.65,
+    shadowRadius: 4,
+    elevation: 2,
   },
   userSection: {
     alignItems: 'center',
@@ -679,10 +737,16 @@ const styles = StyleSheet.create({
   },
   bottomStatsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    alignItems: 'stretch',
+    paddingHorizontal: 5,
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   bottomStatItem: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
   },
   statusBadge: {
     fontSize: 16,
