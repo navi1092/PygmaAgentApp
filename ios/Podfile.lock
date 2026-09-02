@@ -9,6 +9,7 @@ PODS:
   - hermes-engine (0.74.1):
     - hermes-engine/Pre-built (= 0.74.1)
   - hermes-engine/Pre-built (0.74.1)
+  - MultiplatformBleAdapter (0.2.0)
   - RCT-Folly (2024.01.01.00):
     - boost
     - DoubleConversion
@@ -937,6 +938,28 @@ PODS:
   - React-Mapbuffer (0.74.1):
     - glog
     - React-debug
+  - react-native-ble-plx (3.5.1):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - MultiplatformBleAdapter (= 0.2.0)
+    - RCT-Folly (= 2024.01.01.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Codegen
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-rendererdebug
+    - React-utils
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - react-native-geolocation-service (5.3.1):
     - React
   - react-native-image-picker (8.2.1):
@@ -1392,6 +1415,7 @@ DEPENDENCIES:
   - React-jsitracing (from `../node_modules/react-native/ReactCommon/hermes/executor/`)
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
+  - react-native-ble-plx (from `../node_modules/react-native-ble-plx`)
   - react-native-geolocation-service (from `../node_modules/react-native-geolocation-service`)
   - react-native-image-picker (from `../node_modules/react-native-image-picker`)
   - "react-native-netinfo (from `../node_modules/@react-native-community/netinfo`)"
@@ -1434,6 +1458,7 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - MultiplatformBleAdapter
     - SocketRocket
 
 EXTERNAL SOURCES:
@@ -1500,6 +1525,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/logger"
   React-Mapbuffer:
     :path: "../node_modules/react-native/ReactCommon"
+  react-native-ble-plx:
+    :path: "../node_modules/react-native-ble-plx"
   react-native-geolocation-service:
     :path: "../node_modules/react-native-geolocation-service"
   react-native-image-picker:
@@ -1587,6 +1614,7 @@ SPEC CHECKSUMS:
   fmt: 4c2741a687cc09f0634a2e2c72a838b99f1ff120
   glog: c5d68082e772fa1c511173d6b30a9de2c05a69a2
   hermes-engine: 16b8530de1b383cdada1476cf52d1b52f0692cbc
+  MultiplatformBleAdapter: b1fddd0d499b96b607e00f0faa8e60648343dc1d
   RCT-Folly: 5dc73daec3476616d19e8a53f0156176f7b55461
   RCTDeprecation: efb313d8126259e9294dc4ee0002f44a6f676aba
   RCTRequired: f49ea29cece52aee20db633ae7edc4b271435562
@@ -1611,6 +1639,7 @@ SPEC CHECKSUMS:
   React-jsitracing: dd0e541a34027b3ab668ad94cf268482ad6f82fb
   React-logger: 6070f362a1657bb53335eb1fc903d3f49fd79842
   React-Mapbuffer: 2c95cbabc3d75a17747452381e998c35208ea3ee
+  react-native-ble-plx: 4e5c12e7f694a90e0e7a0f6f4645d115146b841a
   react-native-geolocation-service: 32b2c2a3b91e70ce2a8d0c684801aaeb0a07e0ec
   react-native-image-picker: 7abd47bc29c5100aec221b4afdc9e2970c063fe9
   react-native-netinfo: cec9c4e86083cb5b6aba0e0711f563e2fbbff187

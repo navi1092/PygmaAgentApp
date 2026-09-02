@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,6 @@ import ApiService from '../services/ApiService';
 import LocationService from '../services/LocationService';
 import WelcomeIllustration from '../assets/images/WelcomeIllustration';
 import ErrorDialog from '../components/ErrorDialog';
-import AppPermissionService from '../services/AppPermissionService';
 
 // Matches fragment_mobile_number.xml exactly:
 // title="Register" (TextBig=16sp) -> subTitle="Welcome to Pygma" (TextNormal=14sp, black)
@@ -35,14 +34,6 @@ const MobileNumberScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showError, setShowError] = useState(false);
-
-  useEffect(() => {
-    // The legacy Android app explains and requests phone, location and
-    // notification access when its registration screen first opens.
-    AppPermissionService.requestStartupPermissions().catch((error) => {
-      console.warn('Startup permission request failed:', error);
-    });
-  }, []);
 
   const isFormValid = mobileNumber.length === 10 && isTncChecked;
 

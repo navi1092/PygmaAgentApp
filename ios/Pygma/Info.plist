@@ -33,8 +33,6 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Pygma needs Bluetooth to connect to receipt printers.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Pygma needs Bluetooth to connect to receipt printers.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Pygma needs contacts access to select an account phone number.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

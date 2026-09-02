@@ -1,7 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 import BluetoothService from './BluetoothService';
-import RNPrint from 'react-native-print';
 
 const PRINTER_ADDRESS_KEY = 'receiptPrinterAddress';
 const LINE_WIDTH = 32;
@@ -16,6 +14,35 @@ const receiptLine = (label, value) => {
 
 const formatAmount = (value) => Number(value || 0).toFixed(2);
 
+const padDatePart = (value) => String(value).padStart(2, '0');
+
+const formatDateOnly = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return valueOrEmpty(value).split(/[T\s]/)[0];
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+};
+
+const formatReceiptDateTime = (date = new Date()) =>
+  `${formatDateOnly(date)} ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}`;
+
+const getReceiptAmounts = (account, transactions = []) => {
+  const openingBalance = Number(account?.OpeningBalance ?? account?.BalanceAmount) || 0;
+  const collectedAmount = transactions.reduce((total, transaction) => {
+    const amount = Number(transaction.Amount ?? transaction.amount);
+    return total + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+
+  return {
+    openingBalance,
+    collectedAmount,
+    totalAmount: openingBalance + collectedAmount,
+  };
+};
+
+// Kept for optional use elsewhere (e.g. emailing/sharing a receipt preview).
+// Not used for printing anymore — printing now goes through Bluetooth on
+// both platforms, since the SC588 isn't an AirPrint-certified printer.
 const escapeHtml = (value) => valueOrEmpty(value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -24,6 +51,11 @@ const escapeHtml = (value) => valueOrEmpty(value)
   .replace(/'/g, '&#039;');
 
 export const createReceiptHtml = ({ user, account, transactions }) => {
+  const { openingBalance, totalAmount } = getReceiptAmounts(account, transactions);
+  const schemeCode = valueOrEmpty(account?.SchemeCode ?? account?.schemeCode ?? account?.schemecode);
+  const leanAccountNumber = valueOrEmpty(account?.LeanAccountNumber ?? account?.leanAccountNumber);
+  const leanAmount = account?.LeanAmount ?? account?.leanAmount ?? 0;
+  const printedAt = formatReceiptDateTime();
   const headers = ['PrintHeader1', 'PrintHeader2', 'PrintHeader3', 'PrintHeader4']
     .map((key) => escapeHtml(user?.[key]))
     .filter(Boolean)
@@ -47,13 +79,13 @@ export const createReceiptHtml = ({ user, account, transactions }) => {
     .footer { text-align: center; margin-top: 14px; }
   </style></head><body>
     <div class="center">${headers}</div><div class="rule"></div>
-    <p>Agent Device ID: ${escapeHtml(user?.AgentDeviceId)}</p><p>Agent Phone: ${escapeHtml(user?.MobileNumber)}</p>
-    <div class="rule"></div><p>Date: ${escapeHtml(new Date(account?.LastTranDate || Date.now()).toLocaleString())}</p>
+    <p>Agent Number: ${escapeHtml(user?.AgentDeviceId)}</p><p>Agent Phone: ${escapeHtml(user?.MobileNumber)}</p>
+    <div class="rule"></div><p>Date: ${escapeHtml(printedAt)}</p>
     <h1 class="center">${escapeHtml(account?.AccountName)}</h1>
-    <p>Account No: ${escapeHtml(account?.AccountNumber)}</p><p>Open Date: ${escapeHtml(account?.OpeningDate)}</p>
-    <div class="rule"></div><p>Opening Balance: ${formatAmount(account?.OpeningBalance ?? account?.BalanceAmount)}</p>
+    <p>Account No: ${escapeHtml(account?.AccountNumber)}</p>${schemeCode ? `<p>A/C Type : ${escapeHtml(schemeCode)}</p>` : ''}<p>Open Date: ${escapeHtml(formatDateOnly(account?.OpeningDate))}</p>${leanAccountNumber ? `<p>Lean A/c# ${escapeHtml(leanAccountNumber)}</p><p>Lean Amount: ${formatAmount(leanAmount)}</p>` : ''}
+    <div class="rule"></div><p>Opening Balance: ${formatAmount(openingBalance)}</p>
     <table>${receiptRows}</table><div class="rule"></div>
-    <p class="total">Total Amount: ${formatAmount(account?.BalanceAmount)}</p>
+    <p class="total">Total Amount: ${formatAmount(totalAmount)}</p>
     <div class="footer">${footers}<p>${escapeHtml(user?.PrintPoweredBy)}</p></div>
   </body></html>`;
 };
@@ -61,7 +93,13 @@ export const createReceiptHtml = ({ user, account, transactions }) => {
 // Mirrors CollectionViewModel.generateReceiptBytes(): headers, agent/account
 // information, all receipts for the selected account, and configured footers.
 // ESC/POS commands are deliberately kept as byte-compatible ASCII controls.
+// This is what actually gets sent to the printer, on BOTH platforms now.
 export const createReceiptText = ({ user, account, transactions }) => {
+  const { openingBalance, totalAmount } = getReceiptAmounts(account, transactions);
+  const schemeCode = valueOrEmpty(account?.SchemeCode ?? account?.schemeCode ?? account?.schemecode);
+  const leanAccountNumber = valueOrEmpty(account?.LeanAccountNumber ?? account?.leanAccountNumber);
+  const leanAmount = account?.LeanAmount ?? account?.leanAmount ?? 0;
+  const printedAt = formatReceiptDateTime();
   const line = `${'-'.repeat(LINE_WIDTH)}\n`;
   const headers = ['PrintHeader1', 'PrintHeader2', 'PrintHeader3', 'PrintHeader4']
     .map((key) => valueOrEmpty(user?.[key]))
@@ -71,7 +109,7 @@ export const createReceiptText = ({ user, account, transactions }) => {
     .map((key) => valueOrEmpty(user?.[key]))
     .filter(Boolean)
     .join('\n');
-  const accountTransactions = transactions.length ? transactions : [];
+  const accountTransactions = transactions?.length ? transactions : [];
   const receiptRows = accountTransactions.map((transaction) =>
     receiptLine(`Receipt #${transaction.tranNumber ?? transaction.TranNumber ?? transaction.ReceiptNumber ?? '-'}`, formatAmount(transaction.Amount ?? transaction.amount))
   ).join('');
@@ -80,87 +118,88 @@ export const createReceiptText = ({ user, account, transactions }) => {
     '\x1B@', // Initialize printer
     '\x1Ba\x01', headers, '\n', // Centered heading
     '\x1Ba\x00', line,
-    `Agent Device ID: ${valueOrEmpty(user?.AgentDeviceId)}\n`,
+    `Agent Number: ${valueOrEmpty(user?.AgentDeviceId)}\n`,
     `Agent Phone: ${valueOrEmpty(user?.MobileNumber)}\n`,
     line,
-    `Date: ${new Date(account?.LastTranDate || Date.now()).toLocaleString()}\n`,
+    `Date: ${printedAt}\n`,
     '\x1Ba\x01', valueOrEmpty(account?.AccountName), '\n', '\x1Ba\x00',
     `Account No: ${valueOrEmpty(account?.AccountNumber)}\n`,
-    `Open Date: ${valueOrEmpty(account?.OpeningDate)}\n`,
-    account?.LeanAccountNumber ? `Lean A/c#: ${account.LeanAccountNumber}\nLean Amount: ${formatAmount(account.LeanAmount)}\n` : '',
+    schemeCode ? `A/C Type : ${schemeCode}\n` : '',
+    `Open Date: ${formatDateOnly(account?.OpeningDate)}\n`,
+    leanAccountNumber ? `Lean A/c# ${leanAccountNumber}\nLean Amount: ${formatAmount(leanAmount)}\n` : '',
     line,
-    receiptLine('Opening Balance', formatAmount(account?.OpeningBalance ?? account?.BalanceAmount)),
+    receiptLine('Opening Balance', formatAmount(openingBalance)),
     receiptRows,
     line,
-    '\x1BE\x01', receiptLine('Total Amount', formatAmount(account?.BalanceAmount)), '\x1BE\x00',
+    '\x1BE\x01', receiptLine('Total Amount', formatAmount(totalAmount)), '\x1BE\x00',
     '\x1Ba\x01', line, footers, footers ? '\n' : '',
     valueOrEmpty(user?.PrintPoweredBy), '\n\n\n\n', '\x1Ba\x00',
   ].join('');
 };
 
+// ---------------------------------------------------------------------
+// PRINTER DISCOVERY & CONNECTION
+// ---------------------------------------------------------------------
+// BLE has no persistent "bonded devices" list the way Classic did, so
+// finding a printer means scanning for it. This wraps BluetoothService's
+// callback-based scanForDevices() into a Promise that resolves with
+// whatever was found in the given window.
+const scanForPrinters = (timeoutMs = 10000) =>
+  BluetoothService.discoverDevices({ timeoutMs });
+
+const deviceKey = (item) => item?.id;
+
 const getPrinterDevice = async (address = null) => {
-  const [bondedDevices, connectedDevices] = await Promise.all([
-    BluetoothService.getAvailableDevices(),
-    BluetoothService.getConnectedDevices(),
-  ]);
-  const deviceKey = (item) => item?.address || item?.id;
-  const devices = [...connectedDevices, ...bondedDevices].filter((device, index, list) =>
-    index === list.findIndex((candidate) => deviceKey(candidate) === deviceKey(device))
-  );
+  const connectedDevices = await BluetoothService.getConnectedDevices();
   const savedAddress = address || await AsyncStorage.getItem(PRINTER_ADDRESS_KEY);
-  const savedDevice = savedAddress ? devices.find((item) => deviceKey(item) === savedAddress) : null;
-  return {
-    devices,
-    // Reuse the app-selected printer first. If this native session already has
-    // exactly one open Bluetooth socket, it is safe to print there directly.
-    device: savedDevice || (connectedDevices.length === 1 ? connectedDevices[0] : null),
-  };
+
+  // Already connected to the remembered printer this session? Use it
+  // directly, no need to scan.
+  const alreadyConnected = savedAddress
+    && connectedDevices.find((item) => deviceKey(item) === savedAddress);
+  if (alreadyConnected) {
+    return { devices: connectedDevices, device: alreadyConnected };
+  }
+
+  // Not connected — scan to find it (and any other nearby printers, in
+  // case the saved one isn't reachable and the user needs to pick again).
+  const scanned = await scanForPrinters();
+  const savedDevice = savedAddress ? scanned.find((item) => deviceKey(item) === savedAddress) : null;
+
+  return { devices: scanned, device: savedDevice || null };
 };
 
-const printToDevice = async (device, text) => {
-  if (!device) throw new Error('Select a receipt printer first.');
-  if (!(await device.isConnected())) await device.connect();
-  await device.write(text, 'utf8');
-  await AsyncStorage.setItem(PRINTER_ADDRESS_KEY, device.address || device.id);
+const printToDevice = async (deviceId, text) => {
+  if (!deviceId) throw new Error('Select a receipt printer first.');
+  if (!(await BluetoothService.isConnected(deviceId))) {
+    await BluetoothService.connectToDevice(deviceId);
+  }
+  await BluetoothService.sendData(deviceId, text);
+  await AsyncStorage.setItem(PRINTER_ADDRESS_KEY, deviceId);
 };
 
 const ReceiptService = {
-  getPrinters: async () => {
-    const { devices } = await getPrinterDevice();
-    return devices;
-  },
+  // Actively scans for nearby printers (BLE has no bonded-device list to
+  // read up front). Use this to populate a "select a printer" screen.
+  getPrinters: async () => scanForPrinters(),
 
   printReceipt: async (receipt, printerAddress = null) => {
-    if (Platform.OS === 'ios') {
-      await RNPrint.print({ html: createReceiptHtml(receipt) });
-      return { printed: true };
-    }
     const { devices, device } = await getPrinterDevice(printerAddress);
     if (!device) return { needsPrinterSelection: true, devices };
     try {
-      await printToDevice(device, createReceiptText(receipt));
+      await printToDevice(deviceKey(device), createReceiptText(receipt));
     } catch (error) {
-      // Match the Android app: if reconnecting to the remembered printer
-      // fails, fall back to device selection/discovery instead of stopping.
+      // If reconnecting to the remembered printer fails, fall back to
+      // device selection instead of silently failing.
+      console.log('Print failed, falling back to printer selection:', error);
       return { needsPrinterSelection: true, devices };
     }
     return { printed: true };
   },
 
   printWithSelectedPrinter: async (printerAddress, receipt) => {
-    if (Platform.OS === 'ios') {
-      await RNPrint.print({ html: createReceiptHtml(receipt) });
-      return;
-    }
-    const { devices } = await getPrinterDevice();
-    let device = devices.find((item) => (item.address || item.id) === printerAddress);
-    if (!device) {
-      // A device returned by active discovery may not be bonded yet. Connecting
-      // by address mirrors the Android selection flow and returns a writable
-      // BluetoothDevice instance when pairing/connection succeeds.
-      device = await BluetoothService.connectToDevice(printerAddress);
-    }
-    await printToDevice(device, createReceiptText(receipt));
+    // printerAddress here is the BLE device id returned from getPrinters().
+    await printToDevice(printerAddress, createReceiptText(receipt));
   },
 };
 

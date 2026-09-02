@@ -303,13 +303,40 @@ const DashboardScreen = ({ navigation }) => {
         Alert.alert('Pending uploads', 'All collected transactions must be synced before submitting.');
         return;
       }
+      // Keep the exact local submission totals before submitCollection clears
+      // the active collection. These are also the fallback when older API
+      // versions omit totals from SubmitResponse.
+      const submittedTransactionsSnapshot = await DatabaseService.getTransactions();
+      const localSubmittedAmount = submittedTransactionsSnapshot.reduce(
+        (total, transaction) => total + (Number(transaction.Amount ?? transaction.amount) || 0),
+        0,
+      );
+      const localSubmittedCount = submittedTransactionsSnapshot.length;
       const response = await ApiService.submitCollection();
       if (!response.success) throw new Error(response.message || 'Unable to submit collection');
       // Android displays SubmitResponse values, not a local total (the local
       // transactions are deleted immediately after a successful submission).
       const submitData = response.data || {};
-      const submittedAmount = Number(submitData.SubmittedAmount ?? submitData.submittedAmount ?? 0);
-      const submittedTransactions = Number(submitData.SubmittedTranCount ?? submitData.submittedTranCount ?? 0);
+      const submittedAmount = Number(
+        submitData.SubmittedAmount
+        ?? submitData.submittedAmount
+        ?? submitData.TotalAmount
+        ?? submitData.totalAmount
+        ?? submitData.TotalCollection
+        ?? submitData.totalCollection
+        ?? localSubmittedAmount
+      );
+      const submittedTransactions = Number(
+        submitData.SubmittedTranCount
+        ?? submitData.submittedTranCount
+        ?? submitData.TotalTranCount
+        ?? submitData.totalTranCount
+        ?? submitData.TotalReceipt
+        ?? submitData.totalReceipt
+        ?? submitData.ReceiptCount
+        ?? submitData.receiptCount
+        ?? localSubmittedCount
+      );
       const submittedStatus = Number(submitData.CollectionStatus ?? submitData.collectionStatus ?? 3) || 3;
       setSubmittedSummary({ amount: submittedAmount, transactions: submittedTransactions });
       await DatabaseService.deleteAllAccounts();
@@ -391,7 +418,7 @@ const DashboardScreen = ({ navigation }) => {
             <View style={styles.successDialog}>
               <View style={styles.dialogBrandRow}>
                 <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
-                <Text style={styles.dialogBrand}>Pygma</Text>
+                <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
               </View>
               <Text style={styles.dialogMessage}>{downloadedAccountCount} accounts downloaded successfully</Text>
               <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowDownloadSuccess(false)}>
@@ -406,7 +433,7 @@ const DashboardScreen = ({ navigation }) => {
             <View style={styles.successDialog}>
               <View style={styles.dialogBrandRow}>
                 <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
-                <Text style={styles.dialogBrand}>Pygma</Text>
+                <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
               </View>
               <Text style={styles.dialogMessage}>Collection submitted successfully{`\n`}Total Amount {formatINR(submittedSummary.amount)}{`\n`}Total Transactions {submittedSummary.transactions}</Text>
               <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowSubmitSuccess(false)}>
@@ -432,13 +459,13 @@ const DashboardScreen = ({ navigation }) => {
                   <Text style={styles.sheetClose}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.sheetLine}>Total Receipt    <Text style={styles.sheetValue}>{summary?.collectedAccounts || 0}</Text></Text>
-              <Text style={styles.sheetLine}>Total Amount     <Text style={styles.sheetValue}>{formatINR(summary?.totalCollections)}</Text></Text>
+              <Text style={styles.sheetLine}>Total Receipt    <Text style={styles.sheetValue}>{summary?.totalTransactions || 0}</Text></Text>
+              <Text style={styles.sheetLine}>Total Amount     <Text style={styles.sheetValue}>{formatINR(summary?.pendingSubmit)}</Text></Text>
               <Text style={styles.sheetLine}>Total Account    <Text style={styles.sheetValue}>{summary?.totalAccounts || 0}</Text></Text>
               <Text style={styles.sheetLine}>Collected        <Text style={styles.sheetValue}>{summary?.collectedAccounts || 0}</Text></Text>
               <Text style={styles.sheetLine}>Pending          <Text style={styles.sheetValue}>{(summary?.totalAccounts || 0) - (summary?.collectedAccounts || 0)}</Text></Text>
               <TouchableOpacity style={[styles.sheetSubmitButton, { backgroundColor: primaryColor }]} onPress={confirmSubmitCollection}>
-                <Text style={styles.primaryButtonText}>Submit {formatINR(summary?.totalCollections)}</Text>
+                <Text style={styles.primaryButtonText}>Submit {formatINR(summary?.pendingSubmit)}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -539,19 +566,21 @@ const styles = StyleSheet.create({
   },
   successDialog: {
     width: '100%',
+    maxWidth: 360,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 20,
-    minHeight: 300,
-    borderRadius: 20,
+    padding: 16,
+    borderRadius: 14,
     elevation: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
   },
-  dialogBrandRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 18, borderBottomWidth: 1, borderBottomColor: '#E7EEF3' },
-  dialogLogo: { width: 48, height: 48, borderRadius: 24 },
-  dialogBrand: { color: '#2874B2', fontSize: 24, fontWeight: '700', marginLeft: 10 },
-  dialogMessage: { color: '#17324D', fontSize: 18, lineHeight: 27, marginTop: 22 },
-  dialogOkay: { alignSelf: 'stretch', backgroundColor: '#2874B2', borderRadius: 10, minHeight: 50, justifyContent: 'center', alignItems: 'center', marginTop: 28 },
+  dialogBrandRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#E7EEF3' },
+  dialogLogo: { width: 40, height: 40, borderRadius: 20 },
+  dialogBrand: { color: '#2874B2', fontSize: 20, fontWeight: '700', marginLeft: 6 },
+  dialogMessage: { color: '#17324D', fontSize: 16, lineHeight: 23, marginVertical: 16 },
+  dialogOkay: { alignSelf: 'center', minWidth: 120, backgroundColor: '#2874B2', borderRadius: 8, minHeight: 44, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
   dialogOkayText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   sheetOverlay: { flex: 1, backgroundColor: 'rgba(16,37,54,0.52)', justifyContent: 'flex-end' },
   submitSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 30, elevation: 10 },

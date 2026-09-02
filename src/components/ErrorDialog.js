@@ -8,7 +8,7 @@ import {
   StyleSheet,
 } from 'react-native';
 
-const ErrorDialog = ({ visible, message, onClose, title = 'Error', primaryColor = '#2874B2' }) => {
+const ErrorDialog = ({ visible, message, onClose, primaryColor = '#2874B2' }) => {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.dialogOverlay}>
@@ -37,32 +37,36 @@ const styles = StyleSheet.create({
   },
   errorDialog: {
     width: '100%',
+    maxWidth: 360,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 20,
-    minHeight: 300,
-    borderRadius: 20,
+    padding: 16,
+    borderRadius: 14,
     elevation: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
   },
   dialogBrandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingBottom: 18,
+    paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#E7EEF3',
   },
-  dialogLogo: { width: 48, height: 48, borderRadius: 24 },
-  dialogBrand: { color: '#2874B2', fontSize: 24, fontWeight: '700', marginLeft: 10 },
-  dialogMessage: { color: '#17324D', fontSize: 18, lineHeight: 27, marginTop: 22 },
+  dialogLogo: { width: 40, height: 40, borderRadius: 20 },
+  dialogBrand: { color: '#2874B2', fontSize: 20, fontWeight: '700', marginLeft: 6 },
+  dialogMessage: { color: '#17324D', fontSize: 16, lineHeight: 23, marginVertical: 16 },
   dialogButton: {
-    alignSelf: 'stretch',
+    alignSelf: 'center',
+    minWidth: 120,
     backgroundColor: '#2874B2',
-    borderRadius: 10,
-    minHeight: 50,
+    borderRadius: 8,
+    minHeight: 44,
+    paddingHorizontal: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 28,
+    marginTop: 2,
   },
   dialogButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

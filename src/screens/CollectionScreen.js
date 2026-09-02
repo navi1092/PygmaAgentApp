@@ -211,10 +211,11 @@ const CollectionScreen = ({ navigation, route }) => {
       return true;
     });
 
-    // Legacy CollectionFragment shows "No Accounts found" and leaves the
+    // Legacy CollectionFragment shows "No accounts found" and leaves the
     // currently displayed account untouched when a category is empty.
     if (!matchingAccounts.length) {
-      setErrorMessage('No Accounts found');
+      setShowAccountList(false);
+      setErrorMessage('No accounts found');
       setShowError(true);
       return;
     }
@@ -467,32 +468,19 @@ const CollectionScreen = ({ navigation, route }) => {
     if (!currentAccount) return;
     setIsPrinting(true);
     try {
-      if (Platform.OS === 'android') {
-        const bluetoothAllowed = await BluetoothService.requestBluetoothPermission();
-        if (!bluetoothAllowed) {
-          throw new Error('Nearby devices permission is required to find and connect to the pocket printer. Allow it in Settings and try again.');
-        }
-        const bluetoothEnabled = await BluetoothService.requestBluetoothEnabled();
-        if (!bluetoothEnabled) {
-          throw new Error('Turn on Bluetooth to print the receipt.');
-        }
+      const bluetoothAllowed = await BluetoothService.requestBluetoothPermission();
+      if (!bluetoothAllowed) {
+        throw new Error('Bluetooth access is required to find the receipt printer. Allow it in Settings and try again.');
+      }
+      const bluetoothEnabled = await BluetoothService.requestBluetoothEnabled();
+      if (!bluetoothEnabled) {
+        throw new Error('Turn on Bluetooth in Settings, then try printing again.');
       }
       const result = await ReceiptService.printReceipt(await getReceiptPayload());
       if (result.needsPrinterSelection) {
         setPrinterDevices(result.devices);
         setShowPrinterPicker(true);
-        setIsSearchingPrinters(true);
-        BluetoothService.discoverDevices()
-          .then((discoveredDevices) => {
-            setPrinterDevices((existingDevices) => {
-              const combined = [...existingDevices, ...discoveredDevices];
-              return combined.filter((device, index, list) => {
-                const key = device.address || device.id;
-                return index === list.findIndex((candidate) => (candidate.address || candidate.id) === key);
-              });
-            });
-          })
-          .finally(() => setIsSearchingPrinters(false));
+        setIsSearchingPrinters(false);
       }
     } catch (error) {
       setErrorMessage(error.message || 'Unable to print the receipt.');
@@ -813,16 +801,16 @@ const CollectionScreen = ({ navigation, route }) => {
           <View style={styles.detailsGrid}>
             <DetailRow label="Account Number" value={currentAccount.AccountNumber || '-'} />
             <DetailRow right label="Balance" value={`₹${Number(currentAccount.BalanceAmount || 0).toFixed(2)}`} />
-            {currentAccount.LeanAccountNumber ? (
+            {String(currentAccount.LeanAccountNumber ?? currentAccount.leanAccountNumber ?? '').trim() ? (
               <>
-                <DetailRow label="Lean Account Number" value={currentAccount.LeanAccountNumber} />
-                <DetailRow right label="Lean Amount" value={`₹${Number(currentAccount.LeanAmount || 0).toFixed(2)}`} />
+                <DetailRow label="Lean Account Number" value={String(currentAccount.LeanAccountNumber ?? currentAccount.leanAccountNumber).trim()} />
+                <DetailRow right label="Lean Amount" value={`₹${Number(currentAccount.LeanAmount ?? currentAccount.leanAmount ?? 0).toFixed(2)}`} />
               </>
             ) : null}
             <DetailRow label="Opening Date" value={formatDate(currentAccount.OpeningDate)} />
             <DetailRow right label="Last Collection Date" value={formatDate(currentAccount.LastTranDate)} />
             <View style={styles.schemeCell}>
-              <Text style={styles.detailValue}>{`${currentAccount.SchemeCode ? `(${currentAccount.SchemeCode}) ` : ''}${currentAccount.SchemeName || '-'}`}</Text>
+              <Text style={styles.detailValue}>{`${currentAccount.SchemeCode ?? currentAccount.schemeCode ? `(${currentAccount.SchemeCode ?? currentAccount.schemeCode}) ` : ''}${currentAccount.SchemeName ?? currentAccount.schemeName ?? '-'}`}</Text>
               <Text style={styles.detailLabel}>Scheme</Text>
             </View>
           </View>
@@ -915,7 +903,7 @@ const CollectionScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Account list bottom sheet - Search / View All / Uncollected */}
+      {/* Account list bottom sheet scoped to the selected summary category. */}
       <Modal
         visible={showAccountList}
         animationType="slide"
@@ -946,39 +934,6 @@ const CollectionScreen = ({ navigation, route }) => {
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
-
-          <View style={styles.filterRow}>
-            <TouchableOpacity
-              style={[styles.filterButton, { borderColor: primaryColor }, filterMode === 'all' && { backgroundColor: primaryColor }]}
-              onPress={() => setFilterMode('all')}
-            >
-              <Text
-                style={[
-                  styles.filterButtonText,
-                  { color: filterMode === 'all' ? '#FFFFFF' : primaryColor },
-                ]}
-              >
-                View All
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.filterButton,
-                { borderColor: primaryColor },
-                filterMode === 'uncollected' && { backgroundColor: primaryColor },
-              ]}
-              onPress={() => setFilterMode('uncollected')}
-            >
-              <Text
-                style={[
-                  styles.filterButtonText,
-                  { color: filterMode === 'uncollected' ? '#FFFFFF' : primaryColor },
-                ]}
-              >
-                Uncollected
-              </Text>
-            </TouchableOpacity>
-          </View>
 
           <FlatList
             data={filteredAccounts}
@@ -1259,21 +1214,6 @@ const styles = StyleSheet.create({
     color: '#17324D',
     backgroundColor: '#F8FAFC',
   },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 8 },
-  filterButton: {
-    flex: 1,
-    minHeight: 42,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#B9CBD8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-    borderRadius: 10,
-  },
-  filterButtonActive: { backgroundColor: '#2874B2', borderColor: '#2874B2' },
-  filterButtonText: { color: '#2874B2', fontSize: 13, fontWeight: '700' },
-  filterButtonTextActive: { color: '#FFFFFF' },
   modalList: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
   accountListItem: {
     backgroundColor: '#FFFFFF',
