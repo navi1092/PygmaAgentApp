@@ -39,6 +39,14 @@
 	<string>Pygma needs your location to record where collections were made.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Pygma needs access to your photo library to attach receipt or ID images.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+<string>Pygma needs your location to record where collections were made.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Pygma needs your location, including in the background, to accurately record where collections were made.</string>
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Pygma needs access to your photo library to attach receipt or ID images.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Pygma needs access to your photo library so you can select existing receipt or ID images to attach.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
