@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Image,
   Modal,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ApiService from '../services/ApiService';
@@ -19,6 +20,9 @@ import ConnectivityService from '../services/ConnectivityService';
 import Svg, { Path } from 'react-native-svg';
 import ErrorDialog from '../components/ErrorDialog';
 import { getPrimaryColor } from '../utils/theme';
+import BluetoothService from '../services/BluetoothService';
+import ReceiptService from '../services/ReceiptService';
+import PrintIcon from '../assets/images/PrintIcon';
 
 // Matches Android drawable/ic_call.xml used beside the bank contact number.
 const BankCallIcon = () => (
@@ -59,6 +63,9 @@ const DashboardScreen = ({ navigation }) => {
   const [showError, setShowError] = useState(false);
   const [showDownloadSuccess, setShowDownloadSuccess] = useState(false);
   const [downloadedAccountCount, setDownloadedAccountCount] = useState(0);
+  const [showPrinterPicker, setShowPrinterPicker] = useState(false);
+  const [printerDevices, setPrinterDevices] = useState([]);
+  const [isPrintingSummary, setIsPrintingSummary] = useState(false);
   const resolveImageUrl = (value) => {
     if (!value || typeof value !== 'string') return null;
     const link = value.trim();
@@ -354,6 +361,79 @@ const DashboardScreen = ({ navigation }) => {
     }
   };
 
+  const findApiField = (source, fieldName, depth = 0) => {
+    if (!source || typeof source !== 'object' || depth > 4) return null;
+    const matchingKey = Object.keys(source).find((key) =>
+      key.replace(/[_-]/g, '').toLowerCase() === fieldName.toLowerCase()
+    );
+    if (matchingKey) return source[matchingKey];
+    for (const value of Object.values(source)) {
+      const found = findApiField(value, fieldName, depth + 1);
+      if (found !== null && found !== undefined) return found;
+    }
+    return null;
+  };
+
+  const getCollectionSummaryPayload = () => ({
+    user,
+    summary: {
+      totalReceipts: summary?.totalTransactions || 0,
+      totalAmount: summary?.pendingSubmit || 0,
+      totalAccounts: summary?.totalAccounts || 0,
+      collectedAccounts: summary?.collectedAccounts || 0,
+      pendingAccounts: Math.max((summary?.totalAccounts || 0) - (summary?.collectedAccounts || 0), 0),
+      // TranBeginDate belongs to the downloaded agent/user record. An empty
+      // validation property must never mask the populated agent-table value.
+      tranBeginDate: findApiField(user, 'tranbegindate')
+        || findApiField(validation, 'tranbegindate')
+        || null,
+    },
+  });
+
+  const handlePrintCollectionSummary = async () => {
+    setIsPrintingSummary(true);
+    try {
+      const bluetoothAllowed = await BluetoothService.requestBluetoothPermission();
+      if (!bluetoothAllowed) throw new Error('Bluetooth access is required to find the receipt printer.');
+      const bluetoothEnabled = await BluetoothService.requestBluetoothEnabled();
+      if (!bluetoothEnabled) throw new Error('Turn on Bluetooth in Settings, then try printing again.');
+      const result = await ReceiptService.printCollectionSummary(getCollectionSummaryPayload());
+      if (result.needsPrinterSelection) {
+        setPrinterDevices(result.devices);
+        // Native iOS cannot reliably present one Modal over another.
+        setShowSubmitSheet(false);
+        setTimeout(() => setShowPrinterPicker(true), 250);
+      }
+    } catch (error) {
+      setErrorMessage(error.message || 'Unable to print the collection summary.');
+      setShowError(true);
+    } finally {
+      setIsPrintingSummary(false);
+    }
+  };
+
+  const closeSummaryPrinterPicker = () => {
+    setShowPrinterPicker(false);
+    setTimeout(() => setShowSubmitSheet(true), 250);
+  };
+
+  const handleSelectSummaryPrinter = async (printerAddress) => {
+    setShowPrinterPicker(false);
+    setIsPrintingSummary(true);
+    try {
+      await ReceiptService.printCollectionSummaryWithSelectedPrinter(
+        printerAddress,
+        getCollectionSummaryPayload(),
+      );
+    } catch (error) {
+      setErrorMessage(error.message || 'Unable to print the collection summary.');
+      setShowError(true);
+    } finally {
+      setIsPrintingSummary(false);
+      setTimeout(() => setShowSubmitSheet(true), 250);
+    }
+  };
+
   const formatINR = (val) => `₹ ${Number(val || 0).toLocaleString('en-IN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -435,7 +515,7 @@ const DashboardScreen = ({ navigation }) => {
                 <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
                 <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
               </View>
-              <Text style={styles.dialogMessage}>Collection submitted successfully{`\n`}Total Amount {formatINR(submittedSummary.amount)}{`\n`}Total Transactions {submittedSummary.transactions}</Text>
+              <Text style={styles.dialogMessage}>Collection submitted successfully{`\n`}Total Amount: {formatINR(submittedSummary.amount)}{`\n`}Total Transactions: {submittedSummary.transactions}</Text>
               <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowSubmitSuccess(false)}>
                 <Text style={styles.dialogOkayText}>Okay</Text>
               </TouchableOpacity>
@@ -459,13 +539,56 @@ const DashboardScreen = ({ navigation }) => {
                   <Text style={styles.sheetClose}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.sheetLine}>Total Receipt    <Text style={styles.sheetValue}>{summary?.totalTransactions || 0}</Text></Text>
-              <Text style={styles.sheetLine}>Total Amount     <Text style={styles.sheetValue}>{formatINR(summary?.pendingSubmit)}</Text></Text>
-              <Text style={styles.sheetLine}>Total Account    <Text style={styles.sheetValue}>{summary?.totalAccounts || 0}</Text></Text>
-              <Text style={styles.sheetLine}>Collected        <Text style={styles.sheetValue}>{summary?.collectedAccounts || 0}</Text></Text>
-              <Text style={styles.sheetLine}>Pending          <Text style={styles.sheetValue}>{(summary?.totalAccounts || 0) - (summary?.collectedAccounts || 0)}</Text></Text>
-              <TouchableOpacity style={[styles.sheetSubmitButton, { backgroundColor: primaryColor }]} onPress={confirmSubmitCollection}>
-                <Text style={styles.primaryButtonText}>Submit {formatINR(summary?.pendingSubmit)}</Text>
+              {[
+                ['Total Receipt', summary?.totalTransactions || 0],
+                ['Total Amount', formatINR(summary?.pendingSubmit)],
+                ['Total Account', summary?.totalAccounts || 0],
+                ['Collected', summary?.collectedAccounts || 0],
+                ['Pending', Math.max((summary?.totalAccounts || 0) - (summary?.collectedAccounts || 0), 0)],
+              ].map(([label, value]) => (
+                <View style={styles.sheetSummaryRow} key={label}>
+                  <Text style={styles.sheetLine}>{label}</Text>
+                  <Text style={styles.sheetValue}>{value}</Text>
+                </View>
+              ))}
+              <View style={styles.sheetActionRow}>
+                <TouchableOpacity
+                  style={[styles.sheetPrintButton, { borderColor: primaryColor }]}
+                  onPress={handlePrintCollectionSummary}
+                  disabled={isPrintingSummary}
+                  accessibilityLabel="Print collection summary"
+                >
+                  {isPrintingSummary
+                    ? <ActivityIndicator size="small" color={primaryColor} />
+                    : <PrintIcon size={34} />}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.sheetSubmitButton, { backgroundColor: primaryColor }]} onPress={confirmSubmitCollection}>
+                  <Text style={styles.primaryButtonText}>Submit {formatINR(summary?.pendingSubmit)}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={showPrinterPicker} transparent animationType="slide" onRequestClose={closeSummaryPrinterPicker}>
+          <View style={styles.printerModalOverlay}>
+            <View style={styles.printerModalCard}>
+              <View style={styles.sheetHandle} />
+              <Text style={[styles.printerModalTitle, { color: primaryColor }]}>Select Printer</Text>
+              <FlatList
+                data={printerDevices}
+                keyExtractor={(item, index) => String(item.address || item.id || index)}
+                contentContainerStyle={styles.printerDeviceList}
+                ListEmptyComponent={<Text style={styles.printerEmptyText}>No printers found</Text>}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.printerDeviceRow} onPress={() => handleSelectSummaryPrinter(item.address || item.id)}>
+                    <Text style={styles.printerDeviceName}>{item.name || 'Bluetooth Printer'}</Text>
+                    <Text style={styles.printerDeviceAddress}>{item.address || item.id || ''}</Text>
+                  </TouchableOpacity>
+                )}
+              />
+              <TouchableOpacity onPress={closeSummaryPrinterPicker} style={styles.printerCancelButton}>
+                <Text style={[styles.printerCancelText, { color: primaryColor }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -583,15 +706,28 @@ const styles = StyleSheet.create({
   dialogOkay: { alignSelf: 'center', minWidth: 120, backgroundColor: '#2874B2', borderRadius: 8, minHeight: 44, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
   dialogOkayText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   sheetOverlay: { flex: 1, backgroundColor: 'rgba(16,37,54,0.52)', justifyContent: 'flex-end' },
-  submitSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 30, elevation: 10 },
+  submitSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 26, elevation: 10 },
   sheetHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: '#C9D5DE', marginBottom: 18 },
   sheetTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
   sheetTitle: { color: '#17324D', fontSize: 21, fontWeight: '700' },
   sheetCloseTouchTarget: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   sheetClose: { color: '#657789', fontSize: 20, fontWeight: '500', lineHeight: 24 },
-  sheetLine: { color: '#657789', fontSize: 15, marginBottom: 14, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#EEF3F6' },
-  sheetValue: { color: '#17324D', fontWeight: '700' },
-  sheetSubmitButton: { backgroundColor: '#2874B2', borderRadius: 10, minHeight: 52, justifyContent: 'center', alignItems: 'center', marginTop: 12 },
+  sheetSummaryRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#EEF3F6' },
+  sheetLine: { color: '#657789', fontSize: 15 },
+  sheetValue: { color: '#17324D', fontSize: 15, fontWeight: '700', textAlign: 'right' },
+  sheetActionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20 },
+  sheetPrintButton: { width: 56, height: 52, borderWidth: 1.5, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
+  sheetSubmitButton: { flex: 1, backgroundColor: '#2874B2', borderRadius: 10, minHeight: 52, justifyContent: 'center', alignItems: 'center' },
+  printerModalOverlay: { flex: 1, backgroundColor: 'rgba(16,37,54,0.52)', justifyContent: 'flex-end' },
+  printerModalCard: { width: '100%', maxHeight: '70%', backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
+  printerModalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 14 },
+  printerDeviceList: { paddingBottom: 4 },
+  printerDeviceRow: { backgroundColor: '#FFFFFF', borderRadius: 8, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#000000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.14, shadowRadius: 3 },
+  printerDeviceName: { color: '#111111', fontSize: 15, fontWeight: '700' },
+  printerDeviceAddress: { color: '#777777', fontSize: 12, marginTop: 4 },
+  printerEmptyText: { color: '#657789', fontSize: 14, paddingVertical: 20, textAlign: 'center' },
+  printerCancelButton: { alignSelf: 'flex-end', paddingHorizontal: 8, paddingTop: 10 },
+  printerCancelText: { fontSize: 16, fontWeight: '700' },
   // The reference dashboard uses a white page with a purple header mask.
   topMask: {
     flex: 1,

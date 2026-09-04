@@ -29,6 +29,17 @@ const DatabaseService = {
       await db.executeSql(CREATE_VALIDATION_TABLE);
       await db.executeSql(CREATE_API_QUEUE_TABLE);
 
+      // CREATE TABLE IF NOT EXISTS does not add newly introduced columns to
+      // databases already installed on a device.
+      const userTableInfo = await db.executeSql('PRAGMA table_info(user)');
+      const userColumns = new Set();
+      for (let i = 0; i < userTableInfo[0].rows.length; i++) {
+        userColumns.add(userTableInfo[0].rows.item(i).name);
+      }
+      if (!userColumns.has('TranBeginDate')) {
+        await db.executeSql('ALTER TABLE user ADD COLUMN TranBeginDate TEXT');
+      }
+
       console.log('All tables created successfully');
       return db;
     } catch (error) {
@@ -52,14 +63,15 @@ const DatabaseService = {
         MobileNumber,
         AgentImageLink,
         BankImageLink,
+        TranBeginDate,
         ...rest
       } = user;
 
       await db.executeSql(
         `INSERT OR REPLACE INTO user (
           BankID, BankName, BankShortName, AgentID, AgentDeviceId, AgentName,
-          MobileNumber, AgentImageLink, BankImageLink, data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          MobileNumber, AgentImageLink, BankImageLink, TranBeginDate, data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           BankID || null,
           BankName || null,
@@ -70,6 +82,7 @@ const DatabaseService = {
           MobileNumber || null,
           AgentImageLink || null,
           BankImageLink || null,
+          TranBeginDate || null,
           JSON.stringify(rest),
         ]
       );
@@ -84,9 +97,17 @@ const DatabaseService = {
       const result = await db.executeSql('SELECT * FROM user LIMIT 1');
       if (result[0].rows.length > 0) {
         const row = result[0].rows.item(0);
+        const storedData = JSON.parse(row.data || '{}');
         return {
           ...row,
-          ...JSON.parse(row.data || '{}'),
+          ...storedData,
+          // Prefer the dedicated agent-table column, while still supporting
+          // installations where the value only exists in the legacy JSON.
+          TranBeginDate: row.TranBeginDate
+            || storedData.TranBeginDate
+            || storedData.tranBeginDate
+            || storedData.tranbegindate
+            || null,
         };
       }
       return null;
@@ -520,6 +541,8 @@ const DatabaseService = {
       LastTranNumber: startResponse.LastTranNumber ?? startResponse.lastTranNumber ?? current.LastTranNumber,
       LastDatewiseTranNumber: startResponse.LastDatewiseTranNumber ?? startResponse.lastDatewiseTranNumber ?? current.LastDatewiseTranNumber,
       LastDate: startResponse.LastDate ?? startResponse.lastDate ?? current.LastDate,
+      TranBeginDate: startResponse.TranBeginDate ?? startResponse.tranBeginDate ?? startResponse.tranbegindate
+        ?? current.TranBeginDate ?? current.tranBeginDate ?? current.tranbegindate,
     });
   },
 

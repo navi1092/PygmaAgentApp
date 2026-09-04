@@ -28,7 +28,7 @@ const LocationService = {
     }
   },
 
-  getCurrentLocation: () => {
+  getCurrentLocation: ({ timeout = 30000, maximumAge = 1000 } = {}) => {
     return new Promise((resolve, reject) => {
       Geolocation.getCurrentPosition(
         (position) => {
@@ -46,8 +46,8 @@ const LocationService = {
         },
         {
           enableHighAccuracy: true,
-          timeout: 30000,
-          maximumAge: 1000,
+          timeout,
+          maximumAge,
         }
       );
     });

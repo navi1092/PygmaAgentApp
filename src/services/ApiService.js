@@ -152,6 +152,7 @@ const normalizeAgent = (value) => {
     AgentID: ['agentid'], AgentDeviceId: ['agentdeviceid', 'agent_device_id'],
     AgentName: ['agentname'], MobileNumber: ['mobilenumber'],
     AgentImageLink: ['agentimagelink'], BankImageLink: ['bankimagelink'],
+    TranBeginDate: ['tranbegindate', 'tran_begin_date'],
     CollectionStatus: ['collectionstatus'], SettledConfirmed: ['settledconfirmed'],
     SettledUnconfirmed: ['settledunconfirmed'],
     TitleBackColor: ['titlebackcolor'], TitleForeColor: ['titleforecolor'],

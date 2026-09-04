@@ -170,6 +170,18 @@ const CollectionScreen = ({ navigation, route }) => {
   const currentAccount = visibleAccounts[currentIndex] || null;
   const collectedAccountCount = accounts.filter(isAccountCollected).length;
   const primaryColor = getPrimaryColor(user);
+  const maxReceiptsPerAccount = Number(
+    validation?.MaxReceiptsCount ?? validation?.maxReceiptsCount
+  );
+  const currentAccountReceiptCount = Number(
+    currentAccount?.collectionCount ?? currentAccount?.CollectionCount
+  ) || 0;
+  const isReceiptLimitReached = Number.isFinite(maxReceiptsPerAccount)
+    && maxReceiptsPerAccount > 0
+    && currentAccountReceiptCount >= maxReceiptsPerAccount;
+  const receiptLimitMessage = isReceiptLimitReached
+    ? `This account reached the maximum (${maxReceiptsPerAccount} per account) allowed receipts`
+    : '';
 
   const getAccountDefaultAmount = (account) => {
     const agreedAmount = Number(account?.AgreedAmount ?? account?.agreedAmount);
@@ -193,6 +205,11 @@ const CollectionScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     if (!currentAccount || receiptNumber) return;
+    if (isReceiptLimitReached) {
+      setAmount('');
+      setAmountError(receiptLimitMessage);
+      return;
+    }
     const defaultAmount = getAccountDefaultAmount(currentAccount);
     const defaultValue = Number(defaultAmount);
     const remainingAmount = getRemainingAllowedAmount();
@@ -202,7 +219,7 @@ const CollectionScreen = ({ navigation, route }) => {
     } else {
       setAmountError('');
     }
-  }, [currentAccount?.AccountId, receiptNumber, validation, accounts]);
+  }, [currentAccount?.AccountId, receiptNumber, validation, accounts, isReceiptLimitReached, receiptLimitMessage]);
 
   const selectAccountFilter = (nextFilter) => {
     const matchingAccounts = accounts.filter((account) => {
@@ -282,21 +299,25 @@ const CollectionScreen = ({ navigation, route }) => {
       return false;
     }
 
-    const maxReceipts = Number(validation.MaxReceiptsCount ?? validation.maxReceiptsCount);
-    if (Number.isFinite(maxReceipts) && maxReceipts > 0 && Number(currentAccount?.collectionCount || 0) >= maxReceipts) {
-      setAmountError(`This account reached the maximum (${maxReceipts} per account) allowed receipts`);
+    if (isReceiptLimitReached) {
+      setAmountError(receiptLimitMessage);
       return false;
     }
     return true;
   };
 
   const handleAmountChange = (value) => {
+    if (isReceiptLimitReached) return;
     setAmount(value);
     validateAmount(value);
   };
 
   const amountStep = Math.max(Number(currentAccount?.AgreedAmount) || 100, 0.01);
   const adjustAmount = (direction) => {
+    if (isReceiptLimitReached) {
+      setAmountError(receiptLimitMessage);
+      return;
+    }
     const current = Number.parseFloat(amount) || 0;
     const next = direction > 0
       ? current + amountStep
@@ -319,6 +340,10 @@ const CollectionScreen = ({ navigation, route }) => {
       setShowError(true);
       return;
     }
+    if (isReceiptLimitReached) {
+      setAmountError(receiptLimitMessage);
+      return;
+    }
     if (!validateAmount(amount)) return;
     if (!canCollect(parseFloat(amount))) return;
 
@@ -327,7 +352,16 @@ const CollectionScreen = ({ navigation, route }) => {
       let location = null;
       try {
         const hasLocationPermission = await LocationService.requestLocationPermission();
-        if (hasLocationPermission) location = await LocationService.getCurrentLocation();
+        // A receipt should not leave the button blocked while the phone waits
+        // a long time for a fresh GPS fix. Prefer a recent device location and
+        // cap this optional lookup; the existing zero-coordinate fallback is
+        // retained when location services are unavailable.
+        if (hasLocationPermission) {
+          location = await LocationService.getCurrentLocation({
+            timeout: 5000,
+            maximumAge: 60000,
+          });
+        }
       } catch (error) {
         console.log('Collection location unavailable:', error.message || error);
       }
@@ -373,17 +407,33 @@ const CollectionScreen = ({ navigation, route }) => {
           ? { ...account, collectionCount: (Number(account.collectionCount) || 0) + 1, lastCollectedAmt: (Number(account.lastCollectedAmt) || 0) + collectedAmount, lastReceipt: receiptNum }
           : account
       ));
-
-      const syncResult = await ApiService.syncOfflineQueue();
-      await refreshSyncProgress();
       setSummary((s) => ({
         ...s,
         totalAmount: s.totalAmount + collectedAmount,
-        uploaded: s.uploaded + syncResult.uploaded,
-        pending: syncResult.remaining,
+        pending: s.pending + 1,
       }));
-
       setAmount('');
+
+      // The transaction and its retry queue entry are safely stored above, so
+      // show the receipt immediately. Uploading is best-effort background work
+      // and must not keep the Collect button spinning on a slow connection.
+      setIsLoading(false);
+      ApiService.syncOfflineQueue()
+        .then(async () => {
+          await refreshSyncProgress();
+          const transactions = await DatabaseService.getTransactions();
+          const pending = transactions.filter((transaction) =>
+            Number(transaction.syncStatus ?? transaction.SyncStatus) === 0
+          ).length;
+          setSummary((current) => ({
+            ...current,
+            uploaded: Math.max(transactions.length - pending, 0),
+            pending,
+          }));
+        })
+        .catch((error) => {
+          console.log('Background collection sync failed:', error.message || error);
+        });
     } catch (error) {
       setErrorMessage(error.message || 'Collection failed');
       setShowError(true);
@@ -833,14 +883,14 @@ const CollectionScreen = ({ navigation, route }) => {
             <View style={styles.collectionSection}>
               <View style={styles.amountControlRow}>
                 <TouchableOpacity
-                  style={[styles.amountAdjustButton, { backgroundColor: primaryColor }]}
+                  style={[styles.amountAdjustButton, { backgroundColor: primaryColor }, isReceiptLimitReached && styles.buttonDisabled]}
                   onPress={() => adjustAmount(-1)}
-                  disabled={isLoading}
+                  disabled={isLoading || isReceiptLimitReached}
                   accessibilityLabel="Decrease amount"
                 >
                   <Text style={styles.amountAdjustText}>−</Text>
                 </TouchableOpacity>
-                <View style={[styles.amountField, (amountFocused || amount) && { borderColor: primaryColor, backgroundColor: '#FFFFFF' }, amountError && styles.amountInputError]}>
+                <View style={[styles.amountField, (amountFocused || amount) && { borderColor: primaryColor, backgroundColor: '#FFFFFF' }, amountError && styles.amountInputError, isReceiptLimitReached && styles.amountFieldDisabled]}>
                   <Text style={[styles.amountFloatingLabel, { color: primaryColor }]}>Amount</Text>
                   <View style={styles.amountInputRow}>
                     <Text style={[styles.currencyPrefix, (amountFocused || amount) && { color: primaryColor }]}>₹</Text>
@@ -859,15 +909,15 @@ const CollectionScreen = ({ navigation, route }) => {
                         setAmountFocused(false);
                         validateAmount(amount);
                       }}
-                      editable={!isLoading}
+                      editable={!isLoading && !isReceiptLimitReached}
                     />
                   </View>
                   {!!amountError && <Text style={styles.amountErrorIcon}>!</Text>}
                 </View>
                 <TouchableOpacity
-                  style={[styles.amountAdjustButton, { backgroundColor: primaryColor }]}
+                  style={[styles.amountAdjustButton, { backgroundColor: primaryColor }, isReceiptLimitReached && styles.buttonDisabled]}
                   onPress={() => adjustAmount(1)}
-                  disabled={isLoading}
+                  disabled={isLoading || isReceiptLimitReached}
                   accessibilityLabel="Increase amount"
                 >
                   <Text style={styles.amountAdjustText}>+</Text>
@@ -875,9 +925,9 @@ const CollectionScreen = ({ navigation, route }) => {
               </View>
               {!!amountError && <Text style={styles.errorText}>{amountError}</Text>}
               <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: primaryColor }, (!amount || !!amountError) && styles.buttonDisabled]}
+                style={[styles.primaryButton, { backgroundColor: primaryColor }, (!amount || !!amountError || isReceiptLimitReached) && styles.buttonDisabled]}
                 onPress={handleCollect}
-                disabled={isLoading}
+                disabled={isLoading || isReceiptLimitReached || !amount || !!amountError}
               >
                 {isLoading ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Collect</Text>}
               </TouchableOpacity>
@@ -969,8 +1019,8 @@ const CollectionScreen = ({ navigation, route }) => {
                 return (
                   <View style={styles.receiptListCard}>
                     <View style={styles.receiptListTopRow}>
-                      <Text style={styles.receiptListMeta}>Receipt #{receipt}</Text>
-                      <Text style={[styles.receiptListMeta, styles.receiptListDate]}>{formatReceiptDate(transactionDate)}</Text>
+                      <Text style={styles.receiptListMeta} numberOfLines={1}>Receipt #{receipt}</Text>
+                      <Text style={styles.receiptListDate} numberOfLines={1}>{formatReceiptDate(transactionDate)}</Text>
                     </View>
                     <Text style={styles.receiptListName}>{accountName}</Text>
                     <Text style={styles.receiptListAccount}>Account #{accountNumber}</Text>
@@ -1080,10 +1130,13 @@ const formatReceiptDate = (date) => {
   if (!date) return '-';
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) return String(date);
-  return parsed.toLocaleString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
-  });
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parsed.getMonth()];
+  const year = parsed.getFullYear();
+  const hours = parsed.getHours();
+  const displayHours = String(hours % 12 || 12).padStart(2, '0');
+  const minutes = String(parsed.getMinutes()).padStart(2, '0');
+  return `${day} ${month} ${year} ${displayHours}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
 };
 
 const formatReceiptAmount = (amount) => Number(amount || 0).toLocaleString('en-IN', {
@@ -1295,6 +1348,7 @@ const styles = StyleSheet.create({
   currencyPrefix: { fontSize: 16, color: '#808080', fontWeight: '400', marginRight: 5 },
   currencyPrefixHighlighted: { color: '#2874B2' },
   amountInput: { flex: 1, fontSize: 16, color: '#000000', padding: 0, paddingRight: 24 },
+  amountFieldDisabled: { backgroundColor: '#F2F4F6' },
   amountErrorIcon: { position: 'absolute', right: 12, top: 17, width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', backgroundColor: '#B00020', color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   errorText: { color: '#B00020', fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 6 },
   primaryButton: { backgroundColor: '#2874B2', borderRadius: 15, minHeight: 48, paddingVertical: 12, alignItems: 'center', marginTop: 12, marginBottom: 10, elevation: 2 },
@@ -1342,8 +1396,8 @@ const styles = StyleSheet.create({
   receiptsList: { paddingBottom: 8 },
   receiptListCard: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 15, margin: 8, elevation: 5, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 },
   receiptListTopRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  receiptListMeta: { flex: 1, color: '#808080', fontSize: 12 },
-  receiptListDate: { textAlign: 'right' },
+  receiptListMeta: { flex: 1, color: '#808080', fontSize: 12, paddingRight: 8 },
+  receiptListDate: { flexShrink: 0, color: '#808080', fontSize: 11, textAlign: 'right' },
   receiptListName: { color: '#000000', fontSize: 14, fontWeight: '600', marginTop: 5 },
   receiptListAccount: { color: '#808080', fontSize: 12, marginTop: 5 },
   receiptListBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

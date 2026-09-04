@@ -37,6 +37,13 @@
 	<string>Pygma needs contacts access to select an account phone number.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Pygma needs your location to record where collections were made.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Pygma needs access to your photo library to attach receipt or ID images.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -46,8 +53,12 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>

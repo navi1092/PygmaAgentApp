@@ -26,6 +26,28 @@ const formatDateOnly = (value) => {
 const formatReceiptDateTime = (date = new Date()) =>
   `${formatDateOnly(date)} ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}`;
 
+const formatReceiptDateTimeMinutes = (value) => {
+  if (!value) return '';
+  const scalar = value instanceof Date
+    ? value
+    : typeof value === 'object'
+    ? value.TranBeginDate ?? value.tranBeginDate ?? value.value ?? value.date
+    : value;
+  if (!scalar) return '';
+  const dotNetTimestamp = typeof scalar === 'string'
+    ? scalar.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//)?.[1]
+    : null;
+  const numeric = typeof scalar === 'number' || /^\d+$/.test(String(scalar))
+    ? Number(scalar)
+    : null;
+  const normalizedValue = dotNetTimestamp
+    ? Number(dotNetTimestamp)
+    : (numeric !== null && numeric < 100000000000 ? numeric * 1000 : scalar);
+  const date = normalizedValue instanceof Date ? normalizedValue : new Date(normalizedValue);
+  if (Number.isNaN(date.getTime())) return valueOrEmpty(scalar);
+  return `${formatDateOnly(date)} ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
+};
+
 const getReceiptAmounts = (account, transactions = []) => {
   const openingBalance = Number(account?.OpeningBalance ?? account?.BalanceAmount) || 0;
   const collectedAmount = transactions.reduce((total, transaction) => {
@@ -137,6 +159,36 @@ export const createReceiptText = ({ user, account, transactions }) => {
   ].join('');
 };
 
+export const createCollectionSummaryText = ({ user, summary }) => {
+  const tranBeginDate = formatReceiptDateTimeMinutes(summary?.tranBeginDate)
+    || formatReceiptDateTimeMinutes(new Date());
+  const line = `${'-'.repeat(LINE_WIDTH)}\n`;
+  const headers = ['PrintHeader1', 'PrintHeader2', 'PrintHeader3', 'PrintHeader4']
+    .map((key) => valueOrEmpty(user?.[key]))
+    .filter(Boolean)
+    .join('\n');
+  const footers = ['PrintFooter1', 'PrintFooter2', 'PrintFooter3', 'PrintFooter4']
+    .map((key) => valueOrEmpty(user?.[key]))
+    .filter(Boolean)
+    .join('\n');
+
+  return [
+    '\x1B@',
+    '\x1Ba\x01', headers, headers ? '\n' : '',
+    'COLLECTION SUMMARY\n',
+    '\x1Ba\x00', line,
+    `Agent: ${valueOrEmpty(user?.AgentName)}\n`,
+    `Agent Number: ${valueOrEmpty(user?.AgentDeviceId ?? user?.AgentID)}\n`,
+    `Date: ${tranBeginDate}\n`,
+    line,
+    receiptLine('Total Receipts', summary?.totalReceipts),
+    '\x1BE\x01', receiptLine('Total Amount', formatAmount(summary?.totalAmount)), '\x1BE\x00',
+
+    '\x1Ba\x01', line, footers, footers ? '\n' : '',
+    valueOrEmpty(user?.PrintPoweredBy), '\n\n\n\n', '\x1Ba\x00',
+  ].join('');
+};
+
 // ---------------------------------------------------------------------
 // PRINTER DISCOVERY & CONNECTION
 // ---------------------------------------------------------------------
@@ -200,6 +252,22 @@ const ReceiptService = {
   printWithSelectedPrinter: async (printerAddress, receipt) => {
     // printerAddress here is the BLE device id returned from getPrinters().
     await printToDevice(printerAddress, createReceiptText(receipt));
+  },
+
+  printCollectionSummary: async (payload, printerAddress = null) => {
+    const { devices, device } = await getPrinterDevice(printerAddress);
+    if (!device) return { needsPrinterSelection: true, devices };
+    try {
+      await printToDevice(deviceKey(device), createCollectionSummaryText(payload));
+    } catch (error) {
+      console.log('Summary print failed, falling back to printer selection:', error);
+      return { needsPrinterSelection: true, devices };
+    }
+    return { printed: true };
+  },
+
+  printCollectionSummaryWithSelectedPrinter: async (printerAddress, payload) => {
+    await printToDevice(printerAddress, createCollectionSummaryText(payload));
   },
 };
 
