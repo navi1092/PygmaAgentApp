@@ -28,6 +28,7 @@ export const CREATE_USER_TABLE = `
     AgentName TEXT,
     MobileNumber TEXT,
     BankImageLink TEXT,
+    TranBeginDate TEXT,
     Gender INTEGER,
     SettledConfirmed REAL,
     SettledUnconfirmed REAL,

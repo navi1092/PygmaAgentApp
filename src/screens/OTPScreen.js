@@ -7,12 +7,13 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
-  Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
+  NativeEventEmitter,
+  NativeModules,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +21,7 @@ import ApiService from '../services/ApiService';
 import DatabaseService from '../database/DatabaseService';
 import LocationService from '../services/LocationService';
 import OtpIllustration from '../assets/images/OtpIllustration';
+import ErrorDialog from '../components/ErrorDialog';
 
 // Matches fragment_otp.xml + OtpView.java exactly:
 // title="Verify OTP" -> subTitle="We have sent a 6 digit OTP to {number}"
@@ -36,8 +38,12 @@ const OTPScreen = ({ navigation, route }) => {
   const [resendTimer, setResendTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const inputRefs = useRef([]);
+  const verificationInFlightRef = useRef(false);
+  const lastAutoVerifiedOtpRef = useRef('');
   const { mobileNumber, otpId: initialOtpId } = route.params;
   const [otpId, setOtpId] = useState(initialOtpId);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [showError, setShowError] = useState(false);
 
   useEffect(() => {
     let interval;
@@ -49,8 +55,34 @@ const OTPScreen = ({ navigation, route }) => {
     return () => clearInterval(interval);
   }, [resendTimer]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !NativeModules.PygmaOtpRetriever) return undefined;
+    const retriever = NativeModules.PygmaOtpRetriever;
+    const emitter = new NativeEventEmitter(retriever);
+    const subscription = emitter.addListener('PygmaOtpReceived', (code) => {
+      const digits = String(code || '').replace(/\D/g, '').slice(0, 6);
+      if (digits.length === 6) setOtp(digits.split(''));
+    });
+    retriever.startListening().catch((error) => {
+      console.warn('SMS Retriever could not start:', error);
+    });
+    return () => {
+      subscription.remove();
+      retriever.stopListening();
+    };
+  }, []);
+
   const handleOtpChange = (text, index) => {
-    const digit = text.replace(/[^0-9]/g, '').slice(-1);
+    const enteredDigits = text.replace(/[^0-9]/g, '');
+    // iOS one-time-code AutoFill and a pasted Android code can provide all six
+    // digits to the focused field in a single change event.
+    if (enteredDigits.length > 1) {
+      const completeCode = enteredDigits.slice(0, 6);
+      setOtp([...completeCode.padEnd(6, '')]);
+      if (completeCode.length === 6) Keyboard.dismiss();
+      return;
+    }
+    const digit = enteredDigits.slice(-1);
     const newOtp = [...otp];
     newOtp[index] = digit;
     setOtp(newOtp);
@@ -71,8 +103,10 @@ const OTPScreen = ({ navigation, route }) => {
   const otpString = otp.join('');
   const isFormValid = otpString.length === 6;
 
-  const handleVerifyOtp = async () => {
-    if (!isFormValid) return;
+  const handleVerifyOtp = async (codeOverride = null) => {
+    const code = typeof codeOverride === 'string' ? codeOverride : otpString;
+    if (code.length !== 6 || verificationInFlightRef.current) return;
+    verificationInFlightRef.current = true;
     setIsLoading(true);
     try {
       console.log('OTP ID passed to verifyotp:', otpId);
@@ -83,7 +117,7 @@ const OTPScreen = ({ navigation, route }) => {
         // Android sends zero/empty location values when a location fix is not
         // yet available, so verification can still proceed.
       }
-      const response = await ApiService.verifyOtp(mobileNumber, otpString, location, otpId);
+      const response = await ApiService.verifyOtp(mobileNumber, code, location, otpId);
       if (response.success || response.token) {
         // Auth/verifyotp returns LoginKey (stored by ApiService as loginKey),
         // not the legacy response.token field. Never pass undefined to
@@ -101,33 +135,56 @@ const OTPScreen = ({ navigation, route }) => {
         }
         navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
       } else {
-        Alert.alert('Error', response.message || 'Failed to verify OTP');
+        setErrorMessage(response.message || 'Failed to verify OTP');
+        setShowError(true);
       }
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to verify OTP. Please try again.');
+      setErrorMessage(error.message || 'Failed to verify OTP. Please try again.');
+      setShowError(true);
     } finally {
+      verificationInFlightRef.current = false;
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isFormValid) {
+      lastAutoVerifiedOtpRef.current = '';
+      return;
+    }
+    if (lastAutoVerifiedOtpRef.current === otpString) return;
+    lastAutoVerifiedOtpRef.current = otpString;
+    const timeout = setTimeout(() => handleVerifyOtp(otpString), 300);
+    return () => clearTimeout(timeout);
+  }, [otpString, isFormValid, otpId]);
 
   const handleResendOtp = async () => {
     if (!canResend) return;
     setIsLoading(true);
     try {
-      const response = await ApiService.sendOtp(mobileNumber);
+      const appHashKey = Platform.OS === 'android'
+        ? await NativeModules.PygmaOtpRetriever?.getAppHash().catch(() => '')
+        : '';
+      const response = await ApiService.sendOtp(mobileNumber, appHashKey || '');
       if (response.success && response.otpId !== null) {
         setOtpId(response.otpId);
         setOtp(['', '', '', '', '', '']);
         setResendTimer(60);
         setCanResend(false);
         inputRefs.current[0]?.focus();
+        if (Platform.OS === 'android') {
+          NativeModules.PygmaOtpRetriever?.startListening().catch(() => {});
+        }
       } else if (response.success) {
-        Alert.alert('Error', 'Could not start an OTP session. Please try again.');
+        setErrorMessage('Could not start an OTP session. Please try again.');
+        setShowError(true);
       } else {
-        Alert.alert('Error', response.message || 'Failed to resend OTP');
+        setErrorMessage(response.message || 'Failed to resend OTP');
+        setShowError(true);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to resend OTP');
+      setErrorMessage('Failed to resend OTP');
+      setShowError(true);
     } finally {
       setIsLoading(false);
     }
@@ -169,8 +226,11 @@ const OTPScreen = ({ navigation, route }) => {
                 styles.otpInput,
                 focusedIndex === index && styles.otpInputFocused,
               ]}
-              maxLength={1}
+              maxLength={index === 0 ? 6 : 1}
               keyboardType="number-pad"
+              textContentType={index === 0 ? 'oneTimeCode' : 'none'}
+              autoComplete={index === 0 ? (Platform.OS === 'ios' ? 'one-time-code' : 'sms-otp') : 'off'}
+              autoFocus={index === 0}
               value={digit}
               onChangeText={(text) => handleOtpChange(text, index)}
               onKeyPress={(e) => handleKeyPress(e, index)}
@@ -196,7 +256,7 @@ const OTPScreen = ({ navigation, route }) => {
         {/* btnVerify */}
         <TouchableOpacity
           style={[styles.button, !isFormValid && styles.buttonDisabled]}
-          onPress={handleVerifyOtp}
+          onPress={() => handleVerifyOtp()}
           disabled={!isFormValid || isLoading}
         >
           {isLoading ? (
@@ -206,6 +266,7 @@ const OTPScreen = ({ navigation, route }) => {
           )}
         </TouchableOpacity>
       </ScrollView>
+      <ErrorDialog visible={showError} message={errorMessage} onClose={() => setShowError(false)} />
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );

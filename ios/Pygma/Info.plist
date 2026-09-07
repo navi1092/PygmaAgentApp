@@ -33,10 +33,25 @@
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Pygma needs Bluetooth to connect to receipt printers.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Pygma needs Bluetooth to connect to receipt printers.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Pygma needs contacts access to select an account phone number.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Pygma needs your location to record where collections were made.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Pygma needs access to your photo library to attach receipt or ID images.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+<string>Pygma needs your location to record where collections were made.</string>
+<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+<string>Pygma needs your location, including in the background, to accurately record where collections were made.</string>
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Pygma needs access to your photo library to attach receipt or ID images.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Pygma needs access to your photo library so you can select existing receipt or ID images to attach.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -46,8 +61,12 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>

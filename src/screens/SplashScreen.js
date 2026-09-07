@@ -1,16 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../database/DatabaseService';
+import { DEFAULT_PRIMARY_COLOR, getPrimaryColor } from '../utils/theme';
 
 // Matches fragment_splash.xml exactly:
 // White background, centered vertical LinearLayout,
 // 200dp app icon (@mipmap/ic_launcher), tagline text below (Heading2 = 20sp)
 const SplashScreen = ({ navigation }) => {
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_PRIMARY_COLOR);
+
   useEffect(() => {
     const initializeApp = async () => {
       try {
         await DatabaseService.initDatabase();
+        setPrimaryColor(getPrimaryColor(await DatabaseService.getUser()));
         // Android AppData.getLoginKey() is the sole resume condition. A live
         // collection must reopen with this existing session, not request a
         // fresh OTP (the backend deliberately rejects a second login while
@@ -41,7 +45,7 @@ const SplashScreen = ({ navigation }) => {
         resizeMode="contain"
       />
       {/* @string/tag_line, textSize=Heading2 (20sp) */}
-      <Text style={styles.tagline}>Smart Collections... Smarter Growth</Text>
+      <Text style={[styles.tagline, { color: primaryColor }]}>Smart Collections... Smarter Growth</Text>
     </View>
   );
 };

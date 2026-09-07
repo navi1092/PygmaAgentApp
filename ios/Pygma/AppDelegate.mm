@@ -4,7 +4,6 @@
 #import <React/RCTBridgeModule.h>
 #import <Contacts/Contacts.h>
 #import <ContactsUI/ContactsUI.h>
-#import <CoreBluetooth/CoreBluetooth.h>
 
 @interface PygmaContactPicker : NSObject <RCTBridgeModule, CNContactPickerDelegate>
 @property(nonatomic, copy) RCTPromiseResolveBlock resolve;
@@ -69,56 +68,6 @@ RCT_REMAP_METHOD(selectPhone,
   if (resolve != nil) {
     resolve(number ?: (id)kCFNull);
   }
-}
-
-@end
-
-// The Bluetooth permission dialog is only shown after an app uses a Core
-// Bluetooth API. AirPrint does not initialize Core Bluetooth by itself, so
-// keep this small bridge separate from the print UI and invoke it on Print.
-@interface PygmaBluetoothPermission : NSObject <RCTBridgeModule, CBCentralManagerDelegate>
-@property(nonatomic, strong) CBCentralManager *centralManager;
-@property(nonatomic, copy) RCTPromiseResolveBlock resolve;
-@property(nonatomic, copy) RCTPromiseRejectBlock reject;
-@end
-
-@implementation PygmaBluetoothPermission
-
-RCT_EXPORT_MODULE(PygmaBluetoothPermission);
-
-+ (BOOL)requiresMainQueueSetup
-{
-  return YES;
-}
-
-RCT_REMAP_METHOD(requestPermission,
-                 requestPermissionWithResolver:(RCTPromiseResolveBlock)resolve
-                 rejecter:(RCTPromiseRejectBlock)reject)
-{
-  dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.resolve != nil) {
-      reject(@"E_BLUETOOTH_PERMISSION_IN_PROGRESS", @"A Bluetooth permission request is already in progress.", nil);
-      return;
-    }
-
-    self.resolve = resolve;
-    self.reject = reject;
-    // Creating the manager triggers iOS's standard Bluetooth permission
-    // prompt on its first use. The wording is provided by Info.plist.
-    self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
-  });
-}
-
-- (void)centralManagerDidUpdateState:(CBCentralManager *)central
-{
-  if (self.resolve == nil) return;
-
-  BOOL permitted = central.state != CBManagerStateUnauthorized && central.state != CBManagerStateUnsupported;
-  RCTPromiseResolveBlock resolve = self.resolve;
-  self.resolve = nil;
-  self.reject = nil;
-  self.centralManager = nil;
-  resolve(@(permitted));
 }
 
 @end

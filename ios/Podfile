@@ -15,6 +15,11 @@ if linkage != nil
 end
 
 target 'Pygma' do
+  # Xcode 17 reports hundreds of duplicate deprecation/documentation warnings
+  # from React Native and other third-party Pod sources. Keep warnings enabled
+  # for the Pygma app target while treating installed dependencies as external.
+  inhibit_all_warnings!
+
   config = use_native_modules!
 
   # The package is already used by the Android app. Its iOS module uses the
@@ -40,5 +45,21 @@ target 'Pygma' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Several React Native archives intentionally contain platform-specific
+    # object files with no global symbols. Newer libtool versions report each
+    # one even though the archive is valid.
+    installer.pods_project.targets.each do |pod_target|
+      pod_target.build_configurations.each do |build_config|
+        build_config.build_settings['OTHER_LIBTOOLFLAGS'] = '$(inherited) -no_warning_for_no_symbols'
+        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios_version_supported
+      end
+      pod_target.shell_script_build_phases.each do |script_phase|
+        if ['[CP-User] [Hermes] Replace Hermes for the right configuration, if needed',
+            '[CP-User] [RN]Check rncore'].include?(script_phase.name)
+          script_phase.always_out_of_date = '1'
+        end
+      end
+    end
   end
 end
