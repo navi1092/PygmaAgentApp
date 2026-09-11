@@ -37,7 +37,7 @@ const BankCallIcon = () => (
 // Matches fragment_dashboard.xml (bg_top_mask: white bg, blue block with
 // 60dp bottom-rounded corners) + DashboardViewModel.java text/logic exactly:
 // Top: bank circle image, bank name/address/contact(call icon)
-// cardUser: agent circle image, agent name, agent ID | mobile, Logout
+// cardUser: agent circle image, agent name, agent device ID | mobile, Logout
 // cardCollection: "Collection Summary", total collection amount, divider,
 //   Confirmed Settlement | Pending Settlement | Pending To Submit,
 //   status badge (Open/Live/Submitted), Accounts collected/total
@@ -611,7 +611,7 @@ const DashboardScreen = ({ navigation }) => {
                 onError={() => setAgentImageFailed(true)}
               />
               <Text style={styles.userName}>{user?.AgentName || ''}</Text>
-              <Text style={styles.userIdRow}>ID #{user?.AgentID || ''} | {user?.MobileNumber || ''}</Text>
+              <Text style={styles.userIdRow}>ID #{user?.AgentDeviceId || ''} | {user?.MobileNumber || ''}</Text>
             </View>
             <View style={[styles.transactionSummary, { borderColor: primaryColor }]}>
               <Text style={[styles.statusStrip, { backgroundColor: primaryColor }]}>
