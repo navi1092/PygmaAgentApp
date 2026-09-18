@@ -32,11 +32,9 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Pygma uses Bluetooth to connect to the agent's portable thermal printer to print deposit receipts.</string>
+	<string>Pygma uses Bluetooth to connect to the agent&apos;s portable thermal printer to print deposit receipts.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Pygma needs contacts access to select an account phone number.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Pygma tracks the agent's location during collection rounds to verify visits and prevent fraud in deposit collection.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Pygma needs your location to record where collections were made.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
@@ -45,7 +43,6 @@
 	<string>Pygma needs access to your photo library so you can select existing receipt or ID images to attach.</string>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>location</string>
 		<string>bluetooth-central</string>
 	</array>
 	<key>UILaunchStoryboardName</key>

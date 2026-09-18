@@ -26,6 +26,7 @@
     "react-native": "0.74.1",
     "react-native-ble-plx": "^3.5.1",
     "react-native-bluetooth-classic": "*",
+    "react-native-device-info": "^15.0.2",
     "react-native-geolocation-service": "*",
     "react-native-gesture-handler": "2.21.2",
     "react-native-image-picker": "*",

@@ -1226,6 +1226,8 @@ PODS:
     - React-Core
   - RNCAsyncStorage (1.24.0):
     - React-Core
+  - RNDeviceInfo (15.0.2):
+    - React-Core
   - RNGestureHandler (2.21.2):
     - DoubleConversion
     - glog
@@ -1355,7 +1357,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - RNSVG (15.15.5):
+  - RNSVG (15.8.0):
     - React-Core
   - RNVectorIcons (10.3.0):
     - DoubleConversion
@@ -1448,6 +1450,7 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - rn-fetch-blob (from `../node_modules/rn-fetch-blob`)
   - "RNCAsyncStorage (from `../node_modules/@react-native-async-storage/async-storage`)"
+  - RNDeviceInfo (from `../node_modules/react-native-device-info`)
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
@@ -1591,6 +1594,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/rn-fetch-blob"
   RNCAsyncStorage:
     :path: "../node_modules/@react-native-async-storage/async-storage"
+  RNDeviceInfo:
+    :path: "../node_modules/react-native-device-info"
   RNGestureHandler:
     :path: "../node_modules/react-native-gesture-handler"
   RNReanimated:
@@ -1672,11 +1677,12 @@ SPEC CHECKSUMS:
   ReactCommon: 64c64f4ae1f2debe3fab1800e00cb8466a4477b7
   rn-fetch-blob: 25612b6d6f6e980c6f17ed98ba2f58f5696a51ca
   RNCAsyncStorage: b6410dead2732b5c72a7fdb1ecb5651bbcf4674b
+  RNDeviceInfo: 4c852998208b60dc192ae3529e5867817719ad1e
   RNGestureHandler: 8d857f8c5e6697585f6a246d1acbf0533c438ab1
   RNReanimated: 17e0cb093222e9c92a0349f0e07912693f46fc27
   RNScreens: ef68e50aea531dd00c592ba4683bbcb89d4d2e1a
   RNShare: 29d7b0575f35fd0257b02a6f575e79ab2ab0e627
-  RNSVG: 9ffb83515d2c4e0c11d5ca5f83fd9c016348d6cf
+  RNSVG: 8542aa11770b27563714bbd8494a8436385fc85f
   RNVectorIcons: 1b7e9f6a06b5572f3b4e313320b5e566def26c7f
   SocketRocket: abac6f5de4d4d62d24e11868d7a2f427e0ef940d
   Yoga: 348f8b538c3ed4423eb58a8e5730feec50bce372
