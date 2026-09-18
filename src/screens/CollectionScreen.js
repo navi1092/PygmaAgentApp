@@ -1,3 +1,4 @@
+import PygmaLoader from '../components/PygmaLoader';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -6,8 +7,6 @@ import {
   TouchableOpacity,
   StatusBar,
   TextInput,
-  ActivityIndicator,
-  Alert,
   Modal,
   FlatList,
   ScrollView,
@@ -16,9 +15,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Image,
   Pressable,
   TouchableWithoutFeedback,
-  PermissionsAndroid,
   NativeModules,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -33,9 +32,8 @@ import WhatsAppIcon from '../assets/images/WhatsAppIcon';
 import ReceiptService from '../services/ReceiptService';
 import Share from 'react-native-share';
 import Svg, { Path } from 'react-native-svg';
-import { selectContactPhone } from 'react-native-select-contact';
 import ErrorDialog from '../components/ErrorDialog';
-import { getPrimaryColor } from '../utils/theme';
+import { getPrimaryColor, DEFAULT_PRIMARY_COLOR, UI_COLORS, UI_FONT } from '../utils/theme';
 
 const collectionIconPaths = {
   dashboard: 'M520 360V120h320v240H520ZM120 520V120h320v400H120ZM520 840V440h320v400H520ZM120 840V600h320v240H120ZM200 440h160V200H200v240ZM600 760h160V520H600v240ZM600 280h160v-80H600v80ZM200 760h160v-80H200v80Z',
@@ -80,6 +78,7 @@ const CollectionScreen = ({ navigation, route }) => {
   const isCompact = screenWidth < 390;
   const contentPadding = screenWidth >= 500 ? 32 : 16;
   const [accounts, setAccounts] = useState([]);
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
   const [user, setUser] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [amount, setAmount] = useState('');
@@ -89,15 +88,19 @@ const CollectionScreen = ({ navigation, route }) => {
   const [amountError, setAmountError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [receiptNumber, setReceiptNumber] = useState('');
+  const [isCollectingAgain, setIsCollectingAgain] = useState(false);
   const [showAccountList, setShowAccountList] = useState(false);
   const [filterMode, setFilterMode] = useState('all');
   const [accountFilter, setAccountFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchInputRef = useRef(null);
   const [summary, setSummary] = useState({ totalAmount: 0, uploaded: 0, pending: 0 });
   const [syncProgress, setSyncProgress] = useState({ uploaded: 0, total: 0, pending: 0 });
   const [validation, setValidation] = useState(null);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
   const [openWhatsAppAfterPhoneUpdate, setOpenWhatsAppAfterPhoneUpdate] = useState(false);
   const [isSelectingContact, setIsSelectingContact] = useState(false);
@@ -109,6 +112,7 @@ const CollectionScreen = ({ navigation, route }) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showError, setShowError] = useState(false);
+  const [showCollectConfirm, setShowCollectConfirm] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -139,6 +143,8 @@ const CollectionScreen = ({ navigation, route }) => {
       await refreshSyncProgress();
     } catch (error) {
       console.log('Error loading accounts:', error);
+    } finally {
+      setIsLoadingAccounts(false);
     }
   };
 
@@ -168,6 +174,9 @@ const CollectionScreen = ({ navigation, route }) => {
     return true;
   });
   const currentAccount = visibleAccounts[currentIndex] || null;
+  // A collected account can be reopened from the list later. Keep its last
+  // receipt visible so the user can print it or start another collection.
+  const displayedReceiptNumber = isCollectingAgain ? '' : (receiptNumber || currentAccount?.lastReceipt || '');
   const collectedAccountCount = accounts.filter(isAccountCollected).length;
   const primaryColor = getPrimaryColor(user);
   const maxReceiptsPerAccount = Number(
@@ -221,6 +230,23 @@ const CollectionScreen = ({ navigation, route }) => {
     }
   }, [currentAccount?.AccountId, receiptNumber, validation, accounts, isReceiptLimitReached, receiptLimitMessage]);
 
+  const closeAccountList = () => {
+    searchInputRef.current?.blur();
+    Keyboard.dismiss();
+    setSearchFocused(false);
+    setSearchQuery('');
+    setShowAccountList(false);
+  };
+
+  const openAccountList = (mode) => {
+    searchInputRef.current?.blur();
+    Keyboard.dismiss();
+    setSearchFocused(false);
+    setSearchQuery('');
+    setFilterMode(mode);
+    setShowAccountList(true);
+  };
+
   const selectAccountFilter = (nextFilter) => {
     const matchingAccounts = accounts.filter((account) => {
       if (nextFilter === 'collected') return isAccountCollected(account);
@@ -231,15 +257,14 @@ const CollectionScreen = ({ navigation, route }) => {
     // Legacy CollectionFragment shows "No accounts found" and leaves the
     // currently displayed account untouched when a category is empty.
     if (!matchingAccounts.length) {
-      setShowAccountList(false);
+      closeAccountList();
       setErrorMessage('No accounts found');
       setShowError(true);
       return;
     }
 
     setAccountFilter(nextFilter);
-    setFilterMode(nextFilter === 'pending' ? 'uncollected' : nextFilter);
-    setShowAccountList(true);
+    openAccountList(nextFilter === 'pending' ? 'uncollected' : nextFilter);
     setCurrentIndex(0);
     setReceiptNumber('');
     setAmount('');
@@ -402,6 +427,7 @@ const CollectionScreen = ({ navigation, route }) => {
         receiptNum
       );
       setReceiptNumber(receiptNum);
+      setIsCollectingAgain(false);
       setAccounts((current) => current.map((account) =>
         account.AccountId === currentAccount.AccountId
           ? { ...account, collectionCount: (Number(account.collectionCount) || 0) + 1, lastCollectedAmt: (Number(account.lastCollectedAmt) || 0) + collectedAmount, lastReceipt: receiptNum }
@@ -442,7 +468,14 @@ const CollectionScreen = ({ navigation, route }) => {
     }
   };
 
+  const requestCollect = () => {
+    const requestedAmount = Number.parseFloat(amount) || 0;
+    if (!validateAmount(amount) || !canCollect(requestedAmount)) return;
+    setShowCollectConfirm(true);
+  };
+
   const handleCollectAgain = () => {
+    setIsCollectingAgain(true);
     setReceiptNumber('');
     setAmount(getAccountDefaultAmount(currentAccount));
     setAmountError('');
@@ -451,7 +484,8 @@ const CollectionScreen = ({ navigation, route }) => {
   const handleViewReceipts = async () => {
     const transactions = await DatabaseService.getTransactions();
     if (!transactions.length) {
-      Alert.alert('Receipts', 'No Transactions found');
+      setErrorMessage('No Transactions found');
+      setShowError(true);
       return;
     }
     setReceiptTransactions(transactions);
@@ -478,18 +512,9 @@ const CollectionScreen = ({ navigation, route }) => {
     Keyboard.dismiss();
     setIsSelectingContact(true);
     try {
-      if (Platform.OS === 'android') {
-        const permission = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
-        );
-        if (permission !== PermissionsAndroid.RESULTS.GRANTED) {
-          throw new Error('Contacts permission is required to choose a phone number.');
-        }
-      }
-
       const selectedNumber = Platform.OS === 'ios'
         ? await NativeModules.PygmaContactPicker.selectPhone()
-        : (await selectContactPhone())?.selectedPhone?.number;
+        : await NativeModules.PygmaContactPicker.selectPhone();
       if (!selectedNumber) return;
 
       const number = String(selectedNumber)
@@ -533,6 +558,7 @@ const CollectionScreen = ({ navigation, route }) => {
         setIsSearchingPrinters(false);
       }
     } catch (error) {
+      console.warn('[Printer] Print failed:', error.message || String(error));
       setErrorMessage(error.message || 'Unable to print the receipt.');
       setShowError(true);
     } finally {
@@ -547,6 +573,7 @@ const CollectionScreen = ({ navigation, route }) => {
     try {
       await ReceiptService.printWithSelectedPrinter(printerAddress, await getReceiptPayload());
     } catch (error) {
+      console.warn('[Printer] Print failed:', error.message || String(error));
       setErrorMessage(error.message || 'Unable to print the receipt.');
       setShowError(true);
     } finally {
@@ -609,7 +636,8 @@ const CollectionScreen = ({ navigation, route }) => {
     } catch (error) {
       const message = String(error?.message || '');
       if (!/cancel/i.test(message)) {
-        Alert.alert('WhatsApp', message || 'WhatsApp is not installed or could not be opened on this device.');
+        setErrorMessage(message || 'WhatsApp is not installed or could not be opened on this device.');
+        setShowError(true);
       }
     }
   };
@@ -617,7 +645,7 @@ const CollectionScreen = ({ navigation, route }) => {
   const handleUpdatePhoneNumber = async () => {
     const number = phoneNumber.trim();
     if (!/^\d{10}$/.test(number)) {
-      Alert.alert('Invalid number', 'Enter a valid 10 digit mobile number.');
+      setPhoneError('Enter a valid 10 digit mobile number.');
       return;
     }
     setIsUpdatingPhone(true);
@@ -668,7 +696,8 @@ const CollectionScreen = ({ navigation, route }) => {
       try {
         const hasLocationPermission = await LocationService.requestLocationPermission();
         if (!hasLocationPermission) {
-          Alert.alert('Location permission required', 'Allow location access to open your current location.');
+          setErrorMessage('Allow location access to open your current location.');
+        setShowError(true);
           return;
         }
         const currentLocation = await LocationService.getCurrentLocation();
@@ -678,20 +707,23 @@ const CollectionScreen = ({ navigation, route }) => {
           throw new Error('Invalid current location');
         }
       } catch (error) {
-        Alert.alert('Location unavailable', 'Unable to fetch your current location. Please check location services and try again.');
+        setErrorMessage('Unable to fetch your current location. Please check location services and try again.');
+        setShowError(true);
         return;
       }
     }
     try {
-      const directionsUrl = Platform.OS === 'ios'
-        ? `https://maps.apple.com/?ll=${destinationLatitude},${destinationLongitude}&q=Current%20Location`
-        : `https://www.google.com/maps/search/?api=1&query=${destinationLatitude},${destinationLongitude}`;
-      await Linking.openURL(directionsUrl);
+      if (Platform.OS === 'android' && NativeModules.PygmaMapChooser) {
+        await NativeModules.PygmaMapChooser.open(destinationLatitude, destinationLongitude);
+        return;
+      }
+      await Linking.openURL(`https://maps.apple.com/?ll=${destinationLatitude},${destinationLongitude}&q=Current%20Location`);
     } catch (error) {
       try {
         await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${destinationLatitude},${destinationLongitude}`);
       } catch (fallbackError) {
-        Alert.alert('Location unavailable', 'Unable to open directions on this device.');
+        setErrorMessage('Unable to open directions on this device.');
+        setShowError(true);
       }
     }
   };
@@ -699,6 +731,7 @@ const CollectionScreen = ({ navigation, route }) => {
   const goToPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
+      setIsCollectingAgain(false);
       setReceiptNumber('');
       setAmount('');
       setAmountError('');
@@ -708,16 +741,27 @@ const CollectionScreen = ({ navigation, route }) => {
   const goToNext = () => {
     if (currentIndex < visibleAccounts.length - 1) {
       setCurrentIndex(currentIndex + 1);
+      setIsCollectingAgain(false);
       setReceiptNumber('');
       setAmount('');
       setAmountError('');
     }
   };
 
+  const openAccountSearch = () => {
+    openAccountList('all');
+  };
+
   const handleSelectFromList = (index) => {
     const visibleIndex = visibleAccounts.findIndex((account) => account.AccountId === accounts[index]?.AccountId);
-    setCurrentIndex(visibleIndex >= 0 ? visibleIndex : 0);
-    setShowAccountList(false);
+    if (filterMode === 'all') {
+      setAccountFilter('all');
+      setCurrentIndex(index);
+    } else {
+      setCurrentIndex(visibleIndex >= 0 ? visibleIndex : 0);
+    }
+    closeAccountList();
+    setIsCollectingAgain(false);
     setReceiptNumber('');
     setAmount('');
     setAmountError('');
@@ -740,10 +784,19 @@ const CollectionScreen = ({ navigation, route }) => {
       onPress={() => handleSelectFromList(item._idx)}
     >
       <Text style={styles.accountListName}>{item.AccountName}</Text>
-      <Text style={styles.accountListSub}>Account:{item.AccountNumber}</Text>
+      <Text style={styles.accountListSub}>A/c Number:{item.AccountNumber}</Text>
       <Text style={styles.accountListSub}>Contact:{item.MobileNumber}</Text>
     </TouchableOpacity>
   );
+
+  if (isLoadingAccounts) {
+    return (
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor={UI_COLORS.surface} />
+        <PygmaLoader fullScreen />
+      </>
+    );
+  }
 
   if (!currentAccount) {
     return (
@@ -777,7 +830,7 @@ const CollectionScreen = ({ navigation, route }) => {
 
       <KeyboardAvoidingView
         style={styles.keyboardArea}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <ScrollView
         ref={screenScrollRef}
@@ -865,10 +918,10 @@ const CollectionScreen = ({ navigation, route }) => {
             </View>
           </View>
 
-          {receiptNumber ? (
+          {displayedReceiptNumber ? (
             <View style={styles.receiptSection}>
               <Text style={styles.successText}>✿ ₹{Number(currentAccount.lastCollectedAmt || amount || 0).toFixed(2)} is collected</Text>
-              <Text style={styles.receiptNumber}>Receipt #{receiptNumber}</Text>
+              <Text style={styles.receiptNumber}>Receipt #{displayedReceiptNumber}</Text>
               <View style={[styles.receiptAction, { borderColor: primaryColor }]}>
                 <TouchableOpacity style={styles.printAction} onPress={handlePrint} disabled={isPrinting}>
                   <Text style={[styles.printActionText, { color: primaryColor }]}>Print</Text>
@@ -878,6 +931,17 @@ const CollectionScreen = ({ navigation, route }) => {
                   <WhatsAppIcon size={40} />
                 </TouchableOpacity>
               </View>
+              {!isReceiptLimitReached && (
+                <TouchableOpacity
+                  style={[styles.collectAgainButton, { backgroundColor: primaryColor }]}
+                  onPress={handleCollectAgain}
+                  disabled={isLoading}
+                  accessibilityLabel="Collect again for this account"
+                >
+                  <Text style={styles.primaryButtonText}>Collect Again</Text>
+                </TouchableOpacity>
+              )}
+              {isReceiptLimitReached && <Text style={styles.errorText}>{receiptLimitMessage}</Text>}
             </View>
           ) : (
             <View style={styles.collectionSection}>
@@ -891,7 +955,7 @@ const CollectionScreen = ({ navigation, route }) => {
                   <Text style={styles.amountAdjustText}>−</Text>
                 </TouchableOpacity>
                 <View style={[styles.amountField, (amountFocused || amount) && { borderColor: primaryColor, backgroundColor: '#FFFFFF' }, amountError && styles.amountInputError, isReceiptLimitReached && styles.amountFieldDisabled]}>
-                  <Text style={[styles.amountFloatingLabel, { color: primaryColor }]}>Amount</Text>
+                  <Text style={[styles.amountFloatingLabel, { color: amountError ? UI_COLORS.error : primaryColor }]}>Amount</Text>
                   <View style={styles.amountInputRow}>
                     <Text style={[styles.currencyPrefix, (amountFocused || amount) && { color: primaryColor }]}>₹</Text>
                     <TextInput
@@ -926,10 +990,10 @@ const CollectionScreen = ({ navigation, route }) => {
               {!!amountError && <Text style={styles.errorText}>{amountError}</Text>}
               <TouchableOpacity
                 style={[styles.primaryButton, { backgroundColor: primaryColor }, (!amount || !!amountError || isReceiptLimitReached) && styles.buttonDisabled]}
-                onPress={handleCollect}
+                onPress={requestCollect}
                 disabled={isLoading || isReceiptLimitReached || !amount || !!amountError}
               >
-                {isLoading ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Collect</Text>}
+                {isLoading ? <PygmaLoader size="small" /> : <Text style={styles.primaryButtonText}>Collect</Text>}
               </TouchableOpacity>
             </View>
           )}
@@ -943,7 +1007,7 @@ const CollectionScreen = ({ navigation, route }) => {
           <CollectionIcon name="previous" size={31} color="#111111" style={[styles.referenceNavIcon, currentIndex === 0 && styles.navButtonDisabled]} />
           <Text style={styles.referenceNavLabel}>Previous</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowAccountList(true)} style={styles.referenceNavItem}>
+        <TouchableOpacity onPress={openAccountSearch} style={styles.referenceNavItem}>
           <CollectionIcon name="search" size={31} color="#111111" style={styles.referenceNavIcon} />
           <Text style={styles.referenceNavLabel}>Search</Text>
         </TouchableOpacity>
@@ -953,14 +1017,42 @@ const CollectionScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      {/* Account list bottom sheet scoped to the selected summary category. */}
+      <Modal visible={showCollectConfirm} transparent animationType="fade" onRequestClose={() => setShowCollectConfirm(false)}>
+        <View style={styles.collectConfirmOverlay}>
+          <View style={styles.collectConfirmCard}>
+            <View style={styles.collectConfirmBrand}>
+              <Image source={require('../assets/images/logo.png')} style={styles.collectConfirmLogo} />
+              <Text style={[styles.collectConfirmBrandName, { color: primaryColor }]}>Pygma</Text>
+            </View>
+            <Text style={styles.collectConfirmText}>Account Name: {currentAccount?.AccountName || '-'}</Text>
+            <Text style={styles.collectConfirmText}>A/c Number: {currentAccount?.AccountNumber || '-'}</Text>
+            <Text style={styles.collectConfirmAmount}>Amount: ₹{(Number.parseFloat(amount) || 0).toFixed(2)}</Text>
+            <View style={styles.collectConfirmActions}>
+              <TouchableOpacity style={[styles.collectConfirmNo, { borderColor: primaryColor }]} onPress={() => setShowCollectConfirm(false)}>
+                <Text style={[styles.collectConfirmNoText, { color: primaryColor }]}>No</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.collectConfirmYes, { backgroundColor: primaryColor }]}
+                onPress={() => { setShowCollectConfirm(false); handleCollect(); }}
+              >
+                <Text style={styles.collectConfirmYesText}>Yes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Search shows all accounts; summary categories open a filtered list. */}
       <Modal
         visible={showAccountList}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowAccountList(false)}
+        onRequestClose={closeAccountList}
       >
-        <View style={styles.modalContainer}>
+        <KeyboardAvoidingView
+          style={[styles.modalContainer, { marginTop: insets.top, paddingBottom: insets.bottom }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalTitle}>
@@ -970,38 +1062,53 @@ const CollectionScreen = ({ navigation, route }) => {
             </View>
             <TouchableOpacity
               style={styles.closeButtonTouchTarget}
-              onPress={() => setShowAccountList(false)}
+              onPress={closeAccountList}
               accessibilityLabel="Close account list"
             >
-              <Text style={styles.closeButton}>✕</Text>
+              <CollectionIcon name="close" size={26} color={UI_COLORS.text} />
             </TouchableOpacity>
           </View>
 
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search"
-            placeholderTextColor="#999999"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+          <View style={styles.searchField}>
+            <Text
+              pointerEvents="none"
+              style={[styles.searchLabel, (searchFocused || searchQuery) && styles.searchLabelFloating]}
+            >
+              Search
+            </Text>
+            <TextInput
+              ref={searchInputRef}
+              key={filterMode}
+              style={styles.searchInput}
+              accessibilityLabel="Search accounts"
+              selectionColor={UI_COLORS.search}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+          </View>
 
           <FlatList
             data={filteredAccounts}
             renderItem={renderAccountListItem}
             keyExtractor={(item) => item.AccountId?.toString()}
             contentContainerStyle={styles.modalList}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={<Text style={styles.emptyText}>No accounts found</Text>}
           />
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {/* Android TransactionsBottomSheet: opened by the upload/receipt pill. */}
+      {/* Full-screen receipts list opened by the upload/receipt pill. */}
       <Modal visible={showReceipts} transparent animationType="slide" onRequestClose={() => setShowReceipts(false)}>
-        <View style={styles.receiptsOverlay}>
-          <View style={styles.receiptsSheet}>
-            <View style={styles.receiptsSheetHeader}>
-              <Text style={styles.receiptsSheetTitle}>Receipts</Text>
-              <TouchableOpacity style={styles.receiptsCloseButton} onPress={() => setShowReceipts(false)} accessibilityLabel="Close receipts">
-                <CollectionIcon name="close" size={24} color="#000000" />
+        <View style={[styles.modalContainer, { marginTop: insets.top, paddingBottom: insets.bottom }]}>
+            <View style={[styles.modalHeader, styles.receiptsHeader]}>
+              <Text style={styles.modalTitle}>Receipts</Text>
+              <TouchableOpacity style={styles.closeButtonTouchTarget} onPress={() => setShowReceipts(false)} accessibilityLabel="Close receipts">
+                <CollectionIcon name="close" size={26} color={UI_COLORS.text} />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -1037,7 +1144,6 @@ const CollectionScreen = ({ navigation, route }) => {
                 );
               }}
             />
-          </View>
         </View>
       </Modal>
 
@@ -1064,15 +1170,16 @@ const CollectionScreen = ({ navigation, route }) => {
               maxLength={10}
               autoCapitalize="none"
               value={phoneNumber}
-              onChangeText={setPhoneNumber}
+              onChangeText={(value) => { setPhoneNumber(value); setPhoneError(''); }}
               editable={!isUpdatingPhone}
               autoFocus
             />
+            {!!phoneError && <Text style={styles.errorText}>{phoneError}</Text>}
             <TouchableOpacity style={styles.fetchContactsButton} onPress={handleSelectContact} disabled={isSelectingContact || isUpdatingPhone}>
-              {isSelectingContact ? <ActivityIndicator color={primaryColor} size="small" /> : <Text style={[styles.fetchContactsText, { color: primaryColor }]}>SELECT FROM CONTACTS</Text>}
+              {isSelectingContact ? <PygmaLoader size="small" /> : <Text style={[styles.fetchContactsText, { color: primaryColor }]}>SELECT FROM CONTACTS</Text>}
             </TouchableOpacity>
             <TouchableOpacity style={[styles.phoneModalSave, { backgroundColor: primaryColor }]} onPress={handleUpdatePhoneNumber} disabled={isUpdatingPhone}>
-              {isUpdatingPhone ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.phoneModalSaveText}>Add Number</Text>}
+              {isUpdatingPhone ? <PygmaLoader size="small" /> : <Text style={styles.phoneModalSaveText}>Add Number</Text>}
             </TouchableOpacity>
           </Pressable>
           </KeyboardAvoidingView>
@@ -1087,7 +1194,7 @@ const CollectionScreen = ({ navigation, route }) => {
               <Text style={[styles.printerStatusText, { color: primaryColor }]}>
                 {isSearchingPrinters ? 'Searching for printers...' : printerDevices.length ? 'Tap to select a device' : 'No printers found'}
               </Text>
-              {isSearchingPrinters && <ActivityIndicator size="small" color={primaryColor} />}
+              {isSearchingPrinters && <PygmaLoader size="small" />}
             </View>
             {isSearchingPrinters && (
               <View style={styles.printerProgressTrack}>
@@ -1154,7 +1261,7 @@ const DetailRow = ({ label, value, right = false }) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#C8C6FF' },
+  container: { flex: 1, backgroundColor: UI_COLORS.surface },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1163,16 +1270,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     backgroundColor: 'transparent',
   },
-  headerLink: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
-  headerTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  headerLink: { color: UI_COLORS.surface, fontSize: UI_FONT.caption, fontWeight: '800' },
+  headerTitle: { color: UI_COLORS.surface, fontSize: UI_FONT.body, fontWeight: '800' },
   scrollContent: { paddingHorizontal: 42, paddingTop: 16, paddingBottom: 110 },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  emptyText: { fontSize: 14, color: '#808080', textAlign: 'center', marginBottom: 4 },
+  emptyText: { fontSize: UI_FONT.body, color: UI_COLORS.secondaryText, textAlign: 'center', marginBottom: 4 },
 
-  summaryTotalLabel: { fontSize: 12, color: '#808080', marginTop: 6 },
-  summaryTotalAmount: { fontSize: 20, fontWeight: '700', color: '#000000' },
+  summaryTotalLabel: { fontSize: UI_FONT.caption, color: UI_COLORS.secondaryText, marginTop: 6 },
+  summaryTotalAmount: { fontSize: UI_FONT.title, fontWeight: '800', color: UI_COLORS.text },
 
-  accountSubText: { fontSize: 12, color: '#808080', marginTop: 4 },
+  accountSubText: { fontSize: UI_FONT.caption, color: UI_COLORS.secondaryText, marginTop: 4 },
   divider: { height: 1, backgroundColor: '#EEEEEE', marginVertical: 10 },
 
   detailRow: {
@@ -1183,12 +1290,12 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F5F5F5',
   },
 
-  amountLabel: { fontSize: 14, color: '#000000', marginBottom: 6 },
+  amountLabel: { fontSize: UI_FONT.body, color: UI_COLORS.text, marginBottom: 6 },
 
   amountInputError: { borderColor: '#FF0000' },
 
   primaryButtonSmall: {
-    backgroundColor: '#7F7BF4',
+    backgroundColor: DEFAULT_PRIMARY_COLOR,
     borderRadius: 15,
     paddingVertical: 12,
     paddingHorizontal: 20,
@@ -1197,18 +1304,18 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.5 },
 
   outlineButton: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#7F7BF4',
+    backgroundColor: UI_COLORS.surface,
+    borderColor: DEFAULT_PRIMARY_COLOR,
     borderWidth: 1,
     borderRadius: 15,
     paddingVertical: 12,
     paddingHorizontal: 20,
     alignItems: 'center',
   },
-  outlineButtonText: { color: '#7F7BF4', fontSize: 16, fontWeight: '600' },
+  outlineButtonText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.action, fontWeight: '800' },
 
   receiptCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     borderRadius: 8,
     padding: 20,
     alignItems: 'center',
@@ -1237,10 +1344,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   navButtonDisabled: { opacity: 0.3 },
-  navButtonText: { color: '#7F7BF4', fontSize: 14, fontWeight: '600' },
-  navPosition: { fontSize: 13, color: '#808080' },
+  navButtonText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.body, fontWeight: '800' },
+  navPosition: { fontSize: 13, color: UI_COLORS.secondaryText },
 
-  modalContainer: { flex: 1, backgroundColor: '#F8FAFC', marginTop: 220, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
+  modalContainer: { flex: 1, backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1248,82 +1355,94 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
   },
-  modalTitle: { color: '#17324D', fontSize: 20, fontWeight: '700' },
-  modalSubtitle: { color: '#657789', fontSize: 13, marginTop: 5 },
+  modalTitle: { color: UI_COLORS.text, fontSize: UI_FONT.body, fontWeight: '800' },
+  modalSubtitle: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.body, fontWeight: '800', marginTop: 10 },
   closeButtonTouchTarget: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  closeButton: { color: '#17324D', fontSize: 18, fontWeight: '500', lineHeight: 22 },
-  searchInput: {
-    marginHorizontal: 20,
-    marginTop: 4,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#D3DEE7',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#17324D',
-    backgroundColor: '#F8FAFC',
+  closeButton: { color: UI_COLORS.text, fontSize: UI_FONT.heading, fontWeight: '800', lineHeight: 22 },
+  searchField: {
+    marginHorizontal: 16, marginTop: 8, marginBottom: 18,
+    borderWidth: 2, borderColor: UI_COLORS.search, borderRadius: 8,
+    backgroundColor: UI_COLORS.surface,
   },
-  modalList: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
+  searchLabel: {
+    position: 'absolute', top: 15, left: 12, zIndex: 1,
+    color: UI_COLORS.secondaryText, fontSize: UI_FONT.search, fontWeight: '800',
+  },
+  searchLabelFloating: {
+    top: -10,
+    left: 10,
+    paddingHorizontal: 4,
+    backgroundColor: UI_COLORS.surface,
+    color: UI_COLORS.search,
+    fontSize: UI_FONT.caption,
+  },
+  searchInput: {
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: UI_FONT.search,
+    color: UI_COLORS.text,
+    backgroundColor: 'transparent',
+  },
+  modalList: { backgroundColor: UI_COLORS.surface, paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
   accountListItem: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 13,
     marginBottom: 9,
     elevation: 2,
-    shadowColor: '#17324D',
+    shadowColor: UI_COLORS.text,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
   },
-  accountListName: { fontSize: 15, color: '#17324D', fontWeight: '700' },
-  accountListSub: { fontSize: 12, color: '#657789', marginTop: 5 },
+  accountListName: { fontSize: UI_FONT.body, color: UI_COLORS.text, fontWeight: '800' },
+  accountListSub: { fontSize: UI_FONT.caption, color: UI_COLORS.secondaryText, fontWeight: '800', marginTop: 10 },
 
   // Reference collection-screen layout
   container: { flex: 1 },
   keyboardArea: { flex: 1 },
   screenContent: { flex: 1 },
   screenContentContainer: { paddingTop: 8, paddingBottom: 16 },
-  summaryCard: { backgroundColor: '#fff', borderRadius: 8, padding: 8, elevation: 3, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.16, shadowRadius: 4, marginHorizontal: 8, marginBottom: 8 },
-  summaryTitle: { fontSize: 16, fontWeight: '600', color: '#fff', backgroundColor: '#2874B2', width: '100%', textAlign: 'center', paddingVertical: 5 },
+  summaryCard: { backgroundColor: '#fff', borderRadius: 8, padding: 8, elevation: 3, shadowColor: UI_COLORS.text, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.16, shadowRadius: 4, marginHorizontal: 8, marginBottom: 8 },
+  summaryTitle: { fontSize: UI_FONT.action, fontWeight: '800', color: '#fff', backgroundColor: DEFAULT_PRIMARY_COLOR, width: '100%', textAlign: 'center', paddingVertical: 5 },
   summaryCountsRow: { flexDirection: 'row', marginTop: 10, width: '100%' },
   summaryBox: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 4, flex: 1, marginHorizontal: 2.5, paddingVertical: 4 },
   summaryCountItem: { alignItems: 'center', borderWidth: 1, borderColor: '#B9CBD8', borderRadius: 4, flex: 1, marginHorizontal: 2.5, paddingVertical: 4 },
-  summaryBoxActive: { backgroundColor: '#EAF2F7', borderColor: '#2874B2' },
-  summaryCountValue: { fontSize: 14, fontWeight: '600', color: '#000000' },
-  summaryCountLabel: { fontSize: 14, color: '#808080', marginTop: 2 },
+  summaryBoxActive: { backgroundColor: UI_COLORS.surface, borderWidth: 2 },
+  summaryCountValue: { fontSize: UI_FONT.body, fontWeight: '800', color: UI_COLORS.text },
+  summaryCountLabel: { fontSize: UI_FONT.body, color: UI_COLORS.secondaryText, fontWeight: '800', marginTop: 2 },
   actionPills: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', columnGap: 8, marginHorizontal: 10, marginTop: 8, marginBottom: 8 },
   actionPillsCentered: { justifyContent: 'center' },
-  dashboardFooterButton: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#2874B2', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, elevation: 2, shadowColor: '#000000', shadowOpacity: 0.14, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } },
+  dashboardFooterButton: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: DEFAULT_PRIMARY_COLOR, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, elevation: 2, shadowColor: UI_COLORS.text, shadowOpacity: 0.14, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } },
   dashboardFooterButtonCompact: { paddingHorizontal: 12 },
   dashboardFooterIcon: { marginRight: 7 },
-  dashboardFooterText: { color: '#2874B2', fontSize: 14, fontWeight: '600' },
-  positionPill: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#2874B2', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, elevation: 2, shadowColor: '#000000', shadowOpacity: 0.14, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } },
+  dashboardFooterText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.body, fontWeight: '800' },
+  positionPill: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: DEFAULT_PRIMARY_COLOR, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, elevation: 2, shadowColor: UI_COLORS.text, shadowOpacity: 0.14, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } },
   positionPillCompact: { paddingHorizontal: 12 },
   syncUploadIcon: { marginRight: 7 },
-  positionPillText: { color: '#2874B2', fontSize: 14, fontWeight: '600' },
+  positionPillText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.body, fontWeight: '800' },
   card: {
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 15,
     margin: 12,
     elevation: 3,
-    shadowColor: '#000000',
+    shadowColor: UI_COLORS.text,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.16,
     shadowRadius: 4,
   },
   printerModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   accountHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 ,marginTop: 6},
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#2874B2', alignItems: 'center', justifyContent: 'center', marginRight: 5 },
-  avatarText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: DEFAULT_PRIMARY_COLOR, alignItems: 'center', justifyContent: 'center', marginRight: 5 },
+  avatarText: { color: '#fff', fontSize: UI_FONT.body, fontWeight: '800' },
   accountTitleBlock: { flex: 1 },
-  accountName: { fontSize: 14, fontWeight: '600', color: '#000000', textTransform: 'uppercase', marginBottom: 4 },
-  phoneLink: { fontSize: 12, color: '#808080', fontWeight: '400' },
+  accountName: { fontSize: UI_FONT.body, fontWeight: '800', color: UI_COLORS.text, textTransform: 'uppercase', marginBottom: 4 },
+  phoneLink: { fontSize: UI_FONT.caption, color: UI_COLORS.secondaryText, fontWeight: '800' },
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   locationButton: { width: 35, height: 35, marginLeft: 6, alignItems: 'center', justifyContent: 'center' },
   detailsGrid: {
@@ -1335,74 +1454,83 @@ const styles = StyleSheet.create({
   detailCell: { width: '50%', minHeight: 48, paddingRight: 8, paddingBottom: 8, alignItems: 'flex-start' },
   detailCellRight: { paddingLeft: 8, paddingRight: 0 },
   schemeCell: { width: '100%', paddingTop: 0, paddingBottom: 8 },
-  detailValue: { width: '100%', fontSize: 14, fontWeight: '600', color: '#000000', marginBottom: 3, textAlign: 'left' },
-  detailLabel: { width: '100%', fontSize: 12, color: '#808080', textAlign: 'left' },
+  detailValue: { width: '100%', fontSize: UI_FONT.body, fontWeight: '800', color: UI_COLORS.text, marginBottom: 3, textAlign: 'left' },
+  detailLabel: { width: '100%', fontSize: UI_FONT.caption, color: UI_COLORS.secondaryText, fontWeight: '800', textAlign: 'left' },
   collectionSection: { paddingTop: 10 },
   amountControlRow: { flexDirection: 'row', alignItems: 'center', width: '100%' },
-  amountAdjustButton: { width: 40, height: 40, backgroundColor: '#2874B2', alignItems: 'center', justifyContent: 'center' },
-  amountAdjustText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  amountField: { flex: 1, height: 56, borderWidth: 1.5, borderColor: '#808080', borderRadius: 4, marginHorizontal: 3, justifyContent: 'center', paddingHorizontal: 12, backgroundColor: '#FFFFFF' },
-  amountFieldHighlighted: { borderColor: '#2874B2', backgroundColor: '#FFFFFF' },
-  amountFloatingLabel: { position: 'absolute', top: -8, left: 10, paddingHorizontal: 4, backgroundColor: '#fff', color: '#2874B2', fontWeight: '600', fontSize: 12 },
+  amountAdjustButton: { width: 40, height: 40, backgroundColor: DEFAULT_PRIMARY_COLOR, alignItems: 'center', justifyContent: 'center' },
+  amountAdjustText: { color: '#fff', fontSize: UI_FONT.action, fontWeight: '800' },
+  amountField: { flex: 1, height: 56, borderWidth: 1.5, borderColor: UI_COLORS.secondaryText, borderRadius: 4, marginHorizontal: 3, justifyContent: 'center', paddingHorizontal: 12, backgroundColor: UI_COLORS.inputBackground },
+  amountFieldHighlighted: { borderColor: DEFAULT_PRIMARY_COLOR, backgroundColor: UI_COLORS.inputBackground },
+  amountFloatingLabel: { position: 'absolute', top: -8, left: 10, paddingHorizontal: 4, backgroundColor: '#fff', color: DEFAULT_PRIMARY_COLOR, fontWeight: '800', fontSize: UI_FONT.caption },
   amountInputRow: { flexDirection: 'row', alignItems: 'center' },
-  currencyPrefix: { fontSize: 16, color: '#808080', fontWeight: '400', marginRight: 5 },
-  currencyPrefixHighlighted: { color: '#2874B2' },
-  amountInput: { flex: 1, fontSize: 16, color: '#000000', padding: 0, paddingRight: 24 },
+  currencyPrefix: { fontSize: UI_FONT.action, color: UI_COLORS.secondaryText, fontWeight: '800', marginRight: 5 },
+  currencyPrefixHighlighted: { color: DEFAULT_PRIMARY_COLOR },
+  amountInput: { flex: 1, fontSize: UI_FONT.action, color: UI_COLORS.text, padding: 0, paddingRight: 24 },
   amountFieldDisabled: { backgroundColor: '#F2F4F6' },
-  amountErrorIcon: { position: 'absolute', right: 12, top: 17, width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', backgroundColor: '#B00020', color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  errorText: { color: '#B00020', fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 6 },
-  primaryButton: { backgroundColor: '#2874B2', borderRadius: 15, minHeight: 48, paddingVertical: 12, alignItems: 'center', marginTop: 12, marginBottom: 10, elevation: 2 },
-  primaryButtonText: { color: '#fff', fontSize: 16, letterSpacing: 0.8, fontWeight: '600' },
+  amountErrorIcon: { position: 'absolute', right: 12, top: 17, width: 22, height: 22, borderRadius: 11, overflow: 'hidden', textAlign: 'center', textAlignVertical: 'center', backgroundColor: UI_COLORS.error, color: UI_COLORS.surface, fontSize: UI_FONT.body, fontWeight: '800' },
+  errorText: { color: UI_COLORS.error, fontSize: UI_FONT.body, fontWeight: '800', textAlign: 'center', marginTop: 6 },
+  primaryButton: { backgroundColor: DEFAULT_PRIMARY_COLOR, borderRadius: 15, minHeight: 48, paddingVertical: 12, alignItems: 'center', marginTop: 12, marginBottom: 10, elevation: 2 },
+  primaryButtonText: { color: '#fff', fontSize: UI_FONT.action, letterSpacing: 0.8, fontWeight: '800' },
+  collectConfirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.58)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  collectConfirmCard: { width: '100%', maxWidth: 420, backgroundColor: UI_COLORS.surface, borderRadius: 8, padding: 16, paddingBottom: 18, elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10 },
+  collectConfirmBrand: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  collectConfirmLogo: { width: 44, height: 44, borderRadius: 22 },
+  collectConfirmBrandName: { fontSize: UI_FONT.title, lineHeight: 25, fontWeight: '800', marginLeft: 6 },
+  collectConfirmText: { color: UI_COLORS.text, fontSize: UI_FONT.action, lineHeight: 23, fontWeight: '800' },
+  collectConfirmAmount: { color: UI_COLORS.text, fontSize: UI_FONT.action, lineHeight: 23, fontWeight: '800', marginTop: 16 },
+  collectConfirmActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 20, paddingHorizontal: 16 },
+  collectConfirmNo: { minWidth: 90, minHeight: 42, paddingHorizontal: 18, borderWidth: 1.5, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  collectConfirmNoText: { fontSize: UI_FONT.action, lineHeight: 21, fontWeight: '800' },
+  collectConfirmYes: { minWidth: 90, minHeight: 42, paddingHorizontal: 18, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  collectConfirmYesText: { color: UI_COLORS.surface, fontSize: UI_FONT.action, lineHeight: 21, fontWeight: '800' },
   receiptSection: { paddingTop: 10 },
-  successText: { color: '#006400', fontSize: 16, fontWeight: '600', marginBottom: 3 },
-  receiptNumber: { fontSize: 14, fontWeight: '400', color: '#808080', marginBottom: 5 },
-  receiptAction: { height: 52, borderWidth: 1, borderColor: '#2874B2', borderRadius: 16, flexDirection: 'row', overflow: 'hidden' },
+  successText: { color: UI_COLORS.success, fontSize: UI_FONT.action, fontWeight: '800', marginBottom: 3 },
+  receiptNumber: { fontSize: UI_FONT.body, fontWeight: '800', color: UI_COLORS.secondaryText, marginBottom: 5 },
+  receiptAction: { height: 52, borderWidth: 1, borderColor: DEFAULT_PRIMARY_COLOR, borderRadius: 16, flexDirection: 'row', overflow: 'hidden' },
+  collectAgainButton: { borderRadius: 15, minHeight: 48, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', marginTop: 12, elevation: 2 },
   printAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 15 },
-  printActionText: { color: '#2874B2', fontSize: 16, fontWeight: '600' },
+  printActionText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.action, fontWeight: '800' },
   whatsappAction: { width: 50, alignItems: 'center', justifyContent: 'center' },
-  referenceBottomNav: { marginHorizontal: 16, marginTop: 8, borderTopWidth: 1.5, borderTopColor: '#2874B2', backgroundColor: 'transparent', flexDirection: 'row', justifyContent: 'space-around', paddingTop: 8, paddingBottom: 8 },
+  referenceBottomNav: { marginHorizontal: 16, marginTop: 8, borderTopWidth: 1.5, borderTopColor: DEFAULT_PRIMARY_COLOR, backgroundColor: 'transparent', flexDirection: 'row', justifyContent: 'space-around', paddingTop: 8, paddingBottom: 8 },
   referenceNavItem: { alignItems: 'center', minWidth: 80 },
-  referenceNavIcon: { color: '#111', fontSize: 30, fontWeight: '700', lineHeight: 32 },
-  referenceNavLabel: { color: '#000000', fontSize: 14, fontWeight: '600' },
+  referenceNavIcon: { color: '#111', fontSize: 30, fontWeight: '800', lineHeight: 32 },
+  referenceNavLabel: { color: UI_COLORS.text, fontSize: UI_FONT.body, fontWeight: '800' },
   phoneModalRoot: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   phoneModalKeyboardArea: { flex: 1, justifyContent: 'flex-end' },
-  phoneModalCard: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24, maxHeight: '90%' },
+  phoneModalCard: { backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24, maxHeight: '90%' },
   phoneModalHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: '#D4D4D4', marginBottom: 18 },
-  phoneModalTitle: { color: '#17324D', fontSize: 21, fontWeight: '700', textAlign: 'center', marginBottom: 18 },
-  phoneModalInput: { borderWidth: 1.5, borderColor: '#C8D4DE', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, fontSize: 18, color: '#17324D', backgroundColor: '#F8FAFC' },
+  phoneModalTitle: { color: UI_COLORS.text, fontSize: UI_FONT.heading, fontWeight: '800', textAlign: 'center', marginBottom: 18 },
+  phoneModalInput: { borderWidth: 1.5, borderColor: UI_COLORS.border, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, fontSize: UI_FONT.heading, color: UI_COLORS.text, backgroundColor: UI_COLORS.surface },
   fetchContactsButton: { alignItems: 'center', paddingVertical: 16 },
-  fetchContactsText: { color: '#7F7BF4', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+  fetchContactsText: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.body, fontWeight: '800', letterSpacing: 1 },
   phoneModalCancelButton: { alignItems: 'center', paddingTop: 16 },
   phoneModalActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 18, gap: 18 },
-  phoneModalCancel: { color: '#7F7BF4', fontSize: 16, fontWeight: '700' },
-  phoneModalSave: { backgroundColor: '#7F7BF4', borderRadius: 18, minWidth: 82, paddingVertical: 10, alignItems: 'center' },
-  phoneModalSaveText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  printerModalCard: { width: '100%', backgroundColor: '#FFFFFF', borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 16, maxHeight: '78%' },
+  phoneModalCancel: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.action, fontWeight: '800' },
+  phoneModalSave: { backgroundColor: DEFAULT_PRIMARY_COLOR, borderRadius: 18, minWidth: 82, paddingVertical: 10, alignItems: 'center' },
+  phoneModalSaveText: { color: UI_COLORS.surface, fontSize: UI_FONT.action, fontWeight: '800' },
+  printerModalCard: { width: '100%', backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 16, maxHeight: '78%' },
   printerModalHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: '#D4D4D4', marginBottom: 16 },
   printerStatusRow: { minHeight: 30, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  printerStatusText: { flex: 1, fontSize: 14, fontWeight: '600' },
+  printerStatusText: { flex: 1, fontSize: UI_FONT.body, fontWeight: '800' },
   printerProgressTrack: { height: 3, overflow: 'hidden', backgroundColor: '#D8F4EF', marginBottom: 16 },
   printerProgressBar: { width: '32%', height: '100%' },
   printerDeviceList: { paddingHorizontal: 4, paddingBottom: 4 },
-  printerDeviceRow: { backgroundColor: '#FFFFFF', borderRadius: 5, padding: 12, marginBottom: 8, elevation: 3, shadowColor: '#000000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.14, shadowRadius: 3 },
-  printerDeviceName: { color: '#111111', fontSize: 14, fontWeight: '700' },
-  printerDeviceAddress: { color: '#777777', fontSize: 12, marginTop: 4 },
+  printerDeviceRow: { backgroundColor: UI_COLORS.surface, borderRadius: 5, padding: 12, marginBottom: 8, elevation: 3, shadowColor: UI_COLORS.text, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.14, shadowRadius: 3 },
+  printerDeviceName: { color: UI_COLORS.text, fontSize: UI_FONT.body, fontWeight: '800' },
+  printerDeviceAddress: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.caption, marginTop: 4 },
   printerModalCancel: { alignSelf: 'flex-end', paddingHorizontal: 8, paddingTop: 8 },
-  receiptsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  receiptsSheet: { maxHeight: 500, backgroundColor: '#FFFFFF', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 16 },
-  receiptsSheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5, marginBottom: 10 },
-  receiptsSheetTitle: { flex: 1, color: '#000000', fontSize: 14, fontWeight: '400' },
-  receiptsCloseButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  receiptsList: { paddingBottom: 8 },
-  receiptListCard: { backgroundColor: '#FFFFFF', borderRadius: 10, padding: 15, margin: 8, elevation: 5, shadowColor: '#000000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  receiptsHeader: { paddingTop: 4, paddingBottom: 4 },
+  receiptsList: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 8 },
+  receiptListCard: { backgroundColor: UI_COLORS.surface, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 4, marginHorizontal: 2, marginBottom: 8, borderWidth: 1, borderColor: '#E8EAF0', elevation: 2, shadowColor: UI_COLORS.text, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3 },
   receiptListTopRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  receiptListMeta: { flex: 1, color: '#808080', fontSize: 12, paddingRight: 8 },
-  receiptListDate: { flexShrink: 0, color: '#808080', fontSize: 11, textAlign: 'right' },
-  receiptListName: { color: '#000000', fontSize: 14, fontWeight: '600', marginTop: 5 },
-  receiptListAccount: { color: '#808080', fontSize: 12, marginTop: 5 },
+  receiptListMeta: { flex: 1, color: UI_COLORS.secondaryText, fontSize: UI_FONT.caption, paddingRight: 8 },
+  receiptListDate: { flexShrink: 0, color: UI_COLORS.secondaryText, fontSize: 11, textAlign: 'right' },
+  receiptListName: { color: UI_COLORS.text, fontSize: UI_FONT.body, fontWeight: '800', marginTop: 3 },
+  receiptListAccount: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.caption, marginTop: 3 },
   receiptListBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  receiptListAmount: { color: '#2874B2', fontSize: 14, fontWeight: '600' },
-  receiptListError: { color: '#FF0000', fontSize: 12, marginTop: 5 },
+  receiptListAmount: { color: DEFAULT_PRIMARY_COLOR, fontSize: UI_FONT.body, fontWeight: '800' },
+  receiptListError: { color: UI_COLORS.error, fontSize: UI_FONT.caption, marginTop: 5 },
 });
 
 export default CollectionScreen;

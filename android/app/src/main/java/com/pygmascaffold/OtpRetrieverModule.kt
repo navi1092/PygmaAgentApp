@@ -78,7 +78,7 @@ class OtpRetrieverModule(private val context: ReactApplicationContext) :
         @Suppress("DEPRECATION")
         context.packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures
       }
-      val hash = signatures.firstOrNull()?.let { signature ->
+      val hash = signatures?.firstOrNull()?.let { signature ->
         val input = "$packageName ${signature.toCharsString()}"
         val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
         Base64.encodeToString(digest, Base64.NO_PADDING or Base64.NO_WRAP).take(11)

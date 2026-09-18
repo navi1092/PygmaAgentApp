@@ -1,3 +1,5 @@
+import PygmaLoader from '../components/PygmaLoader';
+import { UI_COLORS, UI_FONT } from '../utils/theme';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -6,7 +8,6 @@ import {
   TextInput,
   TouchableOpacity,
   StatusBar,
-  ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -23,6 +24,9 @@ import LocationService from '../services/LocationService';
 import OtpIllustration from '../assets/images/OtpIllustration';
 import ErrorDialog from '../components/ErrorDialog';
 
+// Authentication is shown before the user profile (and its API BackColor) is available.
+const AUTH_PRIMARY_COLOR = '#2F7DB8';
+
 // Matches fragment_otp.xml + OtpView.java exactly:
 // title="Verify OTP" -> subTitle="We have sent a 6 digit OTP to {number}"
 // -> ic_otp_image (250dp) -> OtpView: 6 EditTexts, gray border (otp_box.xml,
@@ -38,6 +42,7 @@ const OTPScreen = ({ navigation, route }) => {
   const [resendTimer, setResendTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
   const inputRefs = useRef([]);
+  const scrollViewRef = useRef(null);
   const verificationInFlightRef = useRef(false);
   const lastAutoVerifiedOtpRef = useRef('');
   const { mobileNumber, otpId: initialOtpId } = route.params;
@@ -133,7 +138,9 @@ const OTPScreen = ({ navigation, route }) => {
         } catch (e) {
           console.log('Agent details fetch ERROR:', e);
         }
-        navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+        // verifyotp/getloggedagentdetail carries AppConfigDetails. Return to
+        // Splash so its version policy is enforced before Dashboard opens.
+        navigation.reset({ index: 0, routes: [{ name: 'Splash' }] });
       } else {
         setErrorMessage(response.message || 'Failed to verify OTP');
         setShowError(true);
@@ -194,10 +201,11 @@ const OTPScreen = ({ navigation, route }) => {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 32) },
@@ -234,7 +242,10 @@ const OTPScreen = ({ navigation, route }) => {
               value={digit}
               onChangeText={(text) => handleOtpChange(text, index)}
               onKeyPress={(e) => handleKeyPress(e, index)}
-              onFocus={() => setFocusedIndex(index)}
+              onFocus={() => {
+                setFocusedIndex(index);
+                setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 120);
+              }}
               onBlur={() => setFocusedIndex(null)}
               editable={!isLoading}
             />
@@ -260,7 +271,7 @@ const OTPScreen = ({ navigation, route }) => {
           disabled={!isFormValid || isLoading}
         >
           {isLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <PygmaLoader size="small" />
           ) : (
             <Text style={styles.buttonText}>Verify</Text>
           )}
@@ -275,7 +286,7 @@ const OTPScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.inputBackground,
   },
   scrollContent: {
     flexGrow: 1,
@@ -285,14 +296,15 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#17324D',
+    fontSize: UI_FONT.title,
+    fontWeight: '800',
+    color: AUTH_PRIMARY_COLOR,
     marginTop: 0,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#657789',
+    fontSize: UI_FONT.action,
+    color: UI_COLORS.text,
+    fontWeight: '800',
     marginTop: 8,
     marginBottom: 8,
   },
@@ -315,17 +327,17 @@ const styles = StyleSheet.create({
     height: 56,
     marginHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: '#C8D4DE',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
+    borderColor: UI_COLORS.border,
+    backgroundColor: UI_COLORS.inputBackground,
+    borderRadius: 4,
     textAlign: 'center',
     fontSize: 22,
-    fontWeight: '700',
-    color: '#17324D',
+    fontWeight: '800',
+    color: UI_COLORS.text,
   },
   otpInputFocused: {
-    borderColor: '#2874B2',
-    backgroundColor: '#FFFFFF',
+    borderColor: AUTH_PRIMARY_COLOR,
+    backgroundColor: UI_COLORS.surface,
   },
   resendRow: {
     flexDirection: 'row',
@@ -335,16 +347,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   resendInfo: {
-    fontSize: 14,
-    color: '#506579',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.secondaryText,
+    fontWeight: '800',
   },
   resendAction: {
-    fontSize: 14,
-    color: '#2874B2',
-    fontWeight: '600',
+    fontSize: UI_FONT.body,
+    color: AUTH_PRIMARY_COLOR,
+    fontWeight: '800',
   },
   button: {
-    backgroundColor: '#2874B2',
+    backgroundColor: AUTH_PRIMARY_COLOR,
     borderRadius: 10,
     minHeight: 52,
     paddingVertical: 14,
@@ -357,9 +370,9 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    color: UI_COLORS.surface,
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
   },
 });
 

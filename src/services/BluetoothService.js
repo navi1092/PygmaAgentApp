@@ -1,43 +1,20 @@
-/**
- * BluetoothPrinterService.js
- *
- * UNIFIED implementation using react-native-ble-plx for BOTH Android and
- * iOS, since your printer supports BLE. One codepath, one library, same
- * behavior on both platforms. The only platform difference is permissions:
- * Android needs an explicit runtime permission prompt; iOS shows its
- * system Bluetooth dialog automatically (driven by Info.plist strings).
- *
- * INSTALL
- *   npm install react-native-ble-plx buffer --legacy-peer-deps
- *   cd ios && pod install
- *
- * You can now remove react-native-bluetooth-classic if nothing else in
- * your app depends on it:
- *   npm uninstall react-native-bluetooth-classic
- *
- * ios/Info.plist — add:
- *   <key>NSBluetoothAlwaysUsageDescription</key>
- *   <string>This app uses Bluetooth to connect to your receipt printer.</string>
- * android/app/src/main/AndroidManifest.xml — make sure these are present
- * (react-native-ble-plx's docs cover this, but for reference):
- *   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
- *   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
- *   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
- *
- * NOTE ON CHARACTERISTIC UUIDs:
- * There's no single standard "printer service" UUID across vendors, so
- * connectToDevice() auto-discovers the first writable characteristic
- * across all of the device's services. Works for most generic ESC/POS
- * BLE printers without needing an exact UUID from the datasheet. If your
- * printer's SDK gives you exact service/characteristic UUIDs, you can
- * hardcode them for a faster, more reliable connect (see comment inline).
- */
-
 import { PermissionsAndroid, Platform } from 'react-native';
 import { BleManager } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 
+// Load Classic only on Android; iOS continues to use BLE.
+const classic = Platform.OS === 'android'
+  ? require('react-native-bluetooth-classic').default : null;
+const isClassic = (id) => id.startsWith('classic:');
+const classicAddress = (id) => id.slice('classic:'.length);
+const classicDevice = (device) => ({
+  id: `classic:${device.address}`,
+  name: `${device.name || 'Bluetooth Printer'} (Classic)`,
+});
+
 const manager = new BleManager();
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // A writable characteristic can have either of these properties.
 const isWritableChar = (char) => char.isWritableWithResponse || char.isWritableWithoutResponse;
@@ -53,6 +30,25 @@ const chunkBuffer = (buffer, size = 180) => {
 // Cache the discovered writable characteristic per device so print calls
 // after connect() don't re-discover services every time.
 const writeTargets = {};
+
+// Looks across all of a device's services for the first writable
+// characteristic. Returns null if none found yet (caller decides whether
+// to retry).
+const findWritableTarget = async (device) => {
+  const services = await device.services();
+  for (const service of services) {
+    const characteristics = await service.characteristics();
+    const writable = characteristics.find(isWritableChar);
+    if (writable) {
+      return {
+        serviceUUID: service.uuid,
+        characteristicUUID: writable.uuid,
+        withResponse: writable.isWritableWithResponse,
+      };
+    }
+  }
+  return null;
+};
 
 const BluetoothService = {
   // ---------------------------------------------------------------------
@@ -98,6 +94,7 @@ const BluetoothService = {
   // ---------------------------------------------------------------------
   isBluetoothEnabled: async () => {
     try {
+      if (classic) return await classic.isBluetoothEnabled();
       const state = await manager.state();
       return state === 'PoweredOn';
     } catch (error) {
@@ -108,19 +105,15 @@ const BluetoothService = {
 
   requestBluetoothEnabled: async () => {
     if (await BluetoothService.isBluetoothEnabled()) return true;
-    if (Platform.OS === 'android') {
-      // Android allows prompting the user to turn Bluetooth on directly.
-      try {
-        await manager.enable();
-        return true;
-      } catch (error) {
-        console.log('Bluetooth enable request failed:', error);
-        return false;
-      }
+    if (Platform.OS !== 'android') {
+      // iOS never lets apps flip Bluetooth on programmatically — only the
+      // user can, via Control Center / Settings.
+      return false;
     }
-    // iOS never lets apps flip Bluetooth on programmatically — only the
-    // user can, via Control Center / Settings.
-    return false;
+
+    // Uses ACTION_REQUEST_ENABLE with an activity result, including cancellation.
+    // Direct adapter.enable() fails for apps targeting Android 13 and above.
+    return classic.requestBluetoothEnabled();
   },
 
   // ---------------------------------------------------------------------
@@ -130,23 +123,17 @@ const BluetoothService = {
    * Scans for nearby BLE printers. Calls onDeviceFound(device) for each
    * unique device as it's found. Returns a stop function — scans don't
    * time out on their own, so call it (or wait for timeoutMs).
+   *
+   * Unnamed devices are now KEPT (previously skipped). Many printers only
+   * expose a name after connecting, or use a manufacturer-specific
+   * advertising packet that Android's BLE stack surfaces differently than
+   * iOS - dropping unnamed devices was likely hiding the printer entirely
+   * on Android.
    */
   scanForDevices: (onDeviceFound, { timeoutMs = 15000, onError } = {}) => {
     const seen = new Set();
     let stopped = false;
     let timer;
-
-    manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
-      if (error) {
-        console.log('BLE scan error:', error);
-        if (!stopped && onError) onError(error);
-        return;
-      }
-      if (!device || seen.has(device.id)) return;
-      if (!device.name && !device.localName) return; // skip unnamed devices
-      seen.add(device.id);
-      onDeviceFound({ id: device.id, name: device.name || device.localName, rssi: device.rssi });
-    });
 
     const stop = () => {
       if (stopped) return;
@@ -154,7 +141,29 @@ const BluetoothService = {
       clearTimeout(timer);
       manager.stopDeviceScan();
     };
+    const fail = (error) => {
+      if (stopped) return;
+      stop();
+      if (onError) onError(error);
+    };
     timer = setTimeout(stop, timeoutMs);
+    try {
+      const started = manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
+        if (error) return fail(error);
+        if (stopped || !device || seen.has(device.id)) return;
+        seen.add(device.id);
+        onDeviceFound({
+          id: device.id,
+          name: device.name || device.localName || 'Unknown Printer',
+          rssi: device.rssi,
+        });
+      });
+      // Recent ble-plx versions also reject the scan-start promise.
+      if (started?.catch) started.catch(fail);
+    } catch (error) {
+      fail(error);
+    }
+
     return stop;
   },
 
@@ -162,7 +171,7 @@ const BluetoothService = {
    * Promise-based discovery helper for screens that need the complete list.
    * Rejecting scan errors prevents the UI from being left in a searching state.
    */
-  discoverDevices: ({ timeoutMs = 10000 } = {}) => new Promise((resolve, reject) => {
+  discoverBleDevices: ({ timeoutMs = 10000 } = {}) => new Promise((resolve, reject) => {
     const devices = [];
     let settled = false;
     let stopScan = () => {};
@@ -181,16 +190,51 @@ const BluetoothService = {
       (device) => devices.push(device),
       { timeoutMs, onError: finish },
     );
-    completionTimer = setTimeout(() => finish(), timeoutMs);
+    if (settled) stopScan();
+    else completionTimer = setTimeout(() => finish(), timeoutMs);
   }),
+
+  discoverDevices: async (options = {}) => {
+    if (!classic) return BluetoothService.discoverBleDevices(options);
+    const devices = new Map();
+    const addClassic = (items) => items.forEach((item) => {
+      const device = classicDevice(item);
+      devices.set(device.id, device);
+    });
+    console.info('[Printer] Reading paired devices');
+    addClassic(await classic.getBondedDevices());
+    console.info('[Printer] Paired devices:', devices.size);
+    let scanError;
+    try {
+      const bleDevices = await BluetoothService.discoverBleDevices(options);
+      bleDevices.forEach((device) => devices.set(device.id, device));
+    } catch (error) {
+      scanError = error;
+    }
+    // Avoid running Classic discovery and BLE scanning on the radio together.
+    const timer = setTimeout(() => {
+      classic.cancelDiscovery().catch(() => {});
+    }, options.timeoutMs || 10000);
+    try {
+      addClassic(await classic.startDiscovery());
+    } catch (error) {
+      scanError = scanError || error;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!devices.size && scanError) throw scanError;
+    return [...devices.values()];
+  },
 
   getConnectedDevices: async () => {
     try {
       const ids = Object.keys(writeTargets);
-      if (ids.length === 0) return [];
+      const connectedClassic = classic
+        ? (await classic.getConnectedDevices()).map(classicDevice) : [];
+      if (ids.length === 0) return connectedClassic;
       const devices = await manager.devices(ids);
       const flags = await Promise.all(devices.map((d) => manager.isDeviceConnected(d.id)));
-      return devices.filter((_, i) => flags[i]);
+      return [...connectedClassic, ...devices.filter((_, i) => flags[i])];
     } catch (error) {
       console.log('Error getting connected devices:', error);
       return [];
@@ -201,44 +245,79 @@ const BluetoothService = {
   // CONNECTION
   // ---------------------------------------------------------------------
   connectToDevice: async (deviceId) => {
+    if (classic && isClassic(deviceId)) {
+      await classic.cancelDiscovery();
+      const address = classicAddress(deviceId);
+      const bonded = await classic.getBondedDevices();
+      if (!bonded.some((device) => device.address === address)) {
+        await classic.pairDevice(address);
+      }
+      return classic.connectToDevice(address);
+    }
+    manager.stopDeviceScan();
     try {
       const device = await manager.connectToDevice(deviceId, { autoConnect: false, timeout: 10000 });
       await device.discoverAllServicesAndCharacteristics();
 
-      try { await device.requestMTU(185); } catch (e) { /* not all printers support this */ }
-
-      const services = await device.services();
-      let target = null;
-      for (const service of services) {
-        const characteristics = await service.characteristics();
-        const writable = characteristics.find(isWritableChar);
-        if (writable) {
-          target = { serviceUUID: service.uuid, characteristicUUID: writable.uuid, withResponse: writable.isWritableWithResponse };
-          break;
-        }
+      // Android sometimes reports discovery as "complete" a moment before
+      // characteristics are actually queryable. Retry once after a short
+      // delay before giving up.
+      let target = await findWritableTarget(device);
+      if (!target) {
+        await sleep(300);
+        target = await findWritableTarget(device);
       }
-      // If your printer's SDK gives you exact UUIDs, skip the loop above
+
+      // If your printer's SDK gives you exact UUIDs, skip discovery above
       // and just hardcode them here instead, e.g.:
       // target = { serviceUUID: '000018f0-...', characteristicUUID: '00002af1-...', withResponse: true };
 
       if (!target) throw new Error('No writable characteristic found — this device may not be a supported printer.');
 
+      let mtu = Platform.OS === 'android' ? 23 : device.mtu;
+
+      // Request a larger MTU so fewer write chunks are needed. Some
+      // Android BLE stacks reject the very first request right after
+      // connecting - retry once, then proceed regardless since chunking
+      // already handles small MTUs.
+      try {
+        mtu = (await device.requestMTU(185)).mtu;
+      } catch (error) {
+        try {
+          await sleep(200);
+          mtu = (await device.requestMTU(185)).mtu;
+        } catch (retryError) {
+          console.log('MTU request not supported by this printer, continuing with default MTU.');
+        }
+      }
+
+      // Preserve the working iOS packet size; Android must respect its MTU.
+      target.chunkSize = Platform.OS === 'android'
+        ? Math.min(180, Math.max(20, (mtu || 23) - 3)) : 180;
       writeTargets[deviceId] = target;
       return device;
     } catch (error) {
+      delete writeTargets[deviceId];
+      await manager.cancelDeviceConnection(deviceId).catch(() => {});
       console.log('Connect failed:', error);
       throw error;
     }
   },
 
   disconnectDevice: async (deviceId) => {
+    if (classic && isClassic(deviceId)) {
+      return classic.disconnectFromDevice(classicAddress(deviceId));
+    }
     try { await manager.cancelDeviceConnection(deviceId); } catch (e) { /* already disconnected */ }
     delete writeTargets[deviceId];
   },
 
   isConnected: async (deviceId) => {
     try {
-      return await manager.isDeviceConnected(deviceId);
+      if (classic && isClassic(deviceId)) {
+        return await classic.isDeviceConnected(classicAddress(deviceId));
+      }
+      return !!writeTargets[deviceId] && await manager.isDeviceConnected(deviceId);
     } catch (error) {
       return false;
     }
@@ -251,16 +330,24 @@ const BluetoothService = {
    * data: a Buffer, Uint8Array, or string of raw bytes (e.g. ESC/POS commands).
    */
   sendData: async (deviceId, data) => {
+    if (classic && isClassic(deviceId)) {
+      const written = await classic.writeToDevice(classicAddress(deviceId), Buffer.from(data));
+      if (!written) throw new Error('Printer did not accept the receipt. Check its connection and try again.');
+      return true;
+    }
     const target = writeTargets[deviceId];
     if (!target) throw new Error('Device not connected — call connectToDevice() first.');
 
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-    for (const part of chunkBuffer(buffer)) {
+    for (const part of chunkBuffer(buffer, target.chunkSize)) {
       const base64Chunk = part.toString('base64');
       if (target.withResponse) {
         await manager.writeCharacteristicWithResponseForDevice(deviceId, target.serviceUUID, target.characteristicUUID, base64Chunk);
       } else {
         await manager.writeCharacteristicWithoutResponseForDevice(deviceId, target.serviceUUID, target.characteristicUUID, base64Chunk);
+        if (Platform.OS === 'android') {
+          await sleep(20); // Allow Android printers to drain unacknowledged writes.
+        }
       }
     }
     return true;

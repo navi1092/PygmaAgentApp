@@ -1,6 +1,13 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import DatabaseService from '../database/DatabaseService';
+import DeviceInfo from 'react-native-device-info';
+
+// Reads the real native build number at runtime — Android's versionCode /
+// iOS's CFBundleVersion, from android/app/build.gradle and Info.plist
+// respectively. No longer hardcoded, so it can never drift from what's
+// actually shipped, and stays correct automatically on every release.
 
 // ============================================================================
 // Base URL — confirmed from android/app/build.gradle buildConfigField SERVER_URL
@@ -12,11 +19,14 @@ const ACCOUNT_DOWNLOAD_TIME_FLAG_KEY = 'accountDownloadTimeFlag';
 // Matches Android's SessionManager.isSessionExpired guard.
 let isSessionExpired = false;
 let sessionExpiredHandler = null;
+let syncInFlight = null;
 
 // APP_VERSION_CODE matches BuildConfig.VERSION_CODE sent as AppVersionId header
 // (see android/app/build.gradle versionCode) — update if the backend requires
 // a specific minimum version.
-const APP_VERSION_CODE = '12';
+
+export const APP_VERSION_CODE = DeviceInfo.getBuildNumber();
+console.log('Native build number:', APP_VERSION_CODE);
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -65,13 +75,9 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !isSessionExpired) {
       isSessionExpired = true;
       try {
-        // Android AuthInterceptor does AppData.clearTokens(), then
-        // BaseRepository.clearDb() / Room clearAllTables().
-        await AsyncStorage.multiRemove([
-          'loginKey', 'agentId', 'bankId', 'userPhone', 'lastOtpId',
-          'appConfig', ACCOUNT_DOWNLOAD_TIME_FLAG_KEY,
-        ]);
-        await DatabaseService.clearAllData();
+        // Keep receipts, queue, and owner IDs so the same agent can resume
+        // after authentication, including after restarting the app.
+        await AsyncStorage.removeItem('loginKey');
       } catch (cleanupError) {
         // Keep the original API failure for the screen that made the request.
         console.log('401 session cleanup error:', cleanupError);
@@ -119,6 +125,14 @@ const parsePayload = (value) => {
   } catch (e) {
     return value;
   }
+};
+
+// AppConfigDetails is embedded in both authentication and agent-detail
+// responses. Deployments may serialize that member as either an object or a
+// JSON string, so normalize it before it is persisted or returned to screens.
+const parseAppConfig = (value) => {
+  const config = parsePayload(value);
+  return config && typeof config === 'object' && !Array.isArray(config) ? config : null;
 };
 
 // AccountUpdateTimeFlag is a Java long. Capture its digits from the raw
@@ -349,10 +363,10 @@ const ApiService = {
         message: result.message,
       });
 
+      let appConfig = null;
       if (result.success && result.data) {
         // Android gets a fresh process after its restart; reset the equivalent
         // iOS one-time guard once a new OTP login succeeds.
-        isSessionExpired = false;
         const verifyData = parsePayload(result.data);
         const verifyResponse = findNestedObject(
           verifyData,
@@ -361,10 +375,25 @@ const ApiService = {
         const loginKey = readField(verifyResponse, ['LoginKey', 'loginKey', 'login_key']);
         const agentId = readField(verifyResponse, ['AgentId', 'agentId', 'agent_id']);
         const bankId = readField(verifyResponse, ['BankId', 'bankId', 'bank_id']);
-        await AsyncStorage.setItem('loginKey', loginKey || '');
+        if (!loginKey || !agentId || !bankId) throw new Error('Login response is missing account details. Please try again.');
+        await DatabaseService.migrateLegacyTransactionSyncStates();
+        const pending = await DatabaseService.getUnsyncedTransactions();
+        const queue = await DatabaseService.getApiQueue('pending');
+        const oldAgentId = await AsyncStorage.getItem('agentId');
+        const oldBankId = await AsyncStorage.getItem('bankId');
+        const sameOwner = oldAgentId === String(agentId) && oldBankId === String(bankId);
+        if ((pending.length || queue.length) && !sameOwner) {
+          throw new Error('Pending collections belong to the previous agent. Sign in with that agent to upload them first.');
+        }
+        if (!sameOwner) {
+          await DatabaseService.clearAllData();
+          await AsyncStorage.removeItem(ACCOUNT_DOWNLOAD_TIME_FLAG_KEY);
+        }
         await AsyncStorage.setItem('agentId', String(agentId || ''));
         await AsyncStorage.setItem('bankId', String(bankId || ''));
-        const appConfig = readField(verifyResponse, ['AppConfigDetails', 'appConfigDetails']);
+        await AsyncStorage.setItem('loginKey', loginKey);
+        isSessionExpired = false;
+        appConfig = parseAppConfig(readField(verifyResponse, ['AppConfigDetails', 'appConfigDetails']));
         if (appConfig) await AsyncStorage.setItem('appConfig', JSON.stringify(appConfig));
         console.log('Auth session saved:', {
           loginKey: Boolean(loginKey),
@@ -373,7 +402,7 @@ const ApiService = {
         });
       }
 
-      return result;
+      return { ...result, appConfig };
     } catch (error) {
       console.log('Verify OTP ERROR:', JSON.stringify(error.response?.data || error.message));
       throw ApiService._handleError(error);
@@ -392,7 +421,10 @@ const ApiService = {
         findNestedObject(agentResponse, ['Agent', 'AgentDetails', 'User']) || agentResponse
       );
       const validation = findNestedObject(agentResponse, ['Validation']);
-      const appConfig = findNestedObject(agentResponse, ['AppConfigDetails', 'AppConfig']);
+      const appConfig = parseAppConfig(
+        readField(agentResponse, ['AppConfigDetails', 'appConfigDetails', 'AppConfig', 'appConfig'])
+        || findNestedObject(agentResponse, ['AppConfigDetails', 'AppConfig'])
+      );
       console.log('Agent details response:', {
         success: result.success,
         statusCode: result.statusCode,
@@ -588,8 +620,21 @@ const ApiService = {
   },
 
   syncOfflineQueue: async () => {
+    if (!syncInFlight) {
+      syncInFlight = ApiService._drainOfflineQueue().finally(() => {
+        syncInFlight = null;
+      });
+    }
+    return syncInFlight;
+  },
+
+  _drainOfflineQueue: async () => {
     const outcome = { online: false, attempted: 0, uploaded: 0, remaining: 0, errors: [] };
     try {
+      outcome.remaining = (await DatabaseService.getUnsyncedTransactions()).length;
+      if (isSessionExpired || !(await AsyncStorage.getItem('loginKey'))) return outcome;
+      const network = await NetInfo.fetch();
+      if (network.isConnected !== true || network.isInternetReachable === false) return outcome;
       // Repair any legacy/local transaction that is unsynced but did not get a
       // queue row. This makes syncStatus the authoritative Android-equivalent
       // gate for submit, while still giving the transaction a retry path.
@@ -606,7 +651,7 @@ const ApiService = {
           try {
             let payload = item.Params;
             while (typeof payload === 'string') payload = JSON.parse(payload);
-            return payload.TransactionId || payload.transactionId;
+            return String(payload.TransactionId || payload.transactionId || '');
           } catch (error) {
             return null;
           }
@@ -614,7 +659,7 @@ const ApiService = {
         .filter(Boolean));
       for (const transaction of unsyncedTransactions) {
         const transactionId = transaction.TransactionId || transaction.transactionId;
-        if (transactionId && !queuedTransactionIds.has(transactionId)) {
+        if (transactionId && !queuedTransactionIds.has(String(transactionId))) {
           await ApiService.addToSyncQueue('Agent/updatetransaction', 'POST', transaction);
         }
       }
@@ -625,8 +670,13 @@ const ApiService = {
       // healthy API can reject/shape appconfig differently from transaction
       // endpoints. The upload response itself is the reliable sync result.
       outcome.online = true;
+      const completedIds = new Set((await DatabaseService.getTransactions())
+        .filter((transaction) => Number(transaction.syncStatus ?? transaction.SyncStatus) === 1)
+        .map((transaction) => String(transaction.TransactionId || transaction.transactionId)));
       for (const item of queueItems) {
+        if (isSessionExpired || !(await AsyncStorage.getItem('loginKey'))) break;
         outcome.attempted += 1;
+        let uploadStateSaved = false;
         try {
           let params = item.Params;
           // Read legacy rows created before the double-encoding fix too.
@@ -638,6 +688,12 @@ const ApiService = {
           const endpoint = item.Endpoint === '/transactions/collection' || item.Endpoint === 'transactions/collection'
             ? 'Agent/updatetransaction'
             : String(item.Endpoint || '').replace(/^\/+/, '');
+          const transactionId = params?.TransactionId || params?.transactionId;
+          if (endpoint === 'Agent/updatetransaction' && completedIds.has(String(transactionId))) {
+            uploadStateSaved = true;
+            await DatabaseService.deleteApiQueueItem(item.QueueId);
+            continue;
+          }
           const response = await apiClient.post(endpoint, params);
           const result = unwrap(response);
           if (result.success) {
@@ -651,6 +707,8 @@ const ApiService = {
             if (endpoint === 'Agent/updatetransaction') {
               const transactionId = params.TransactionId || params.transactionId;
               if (transactionId) await DatabaseService.updateTransactionSyncState(transactionId, 1);
+              uploadStateSaved = true;
+              completedIds.add(String(transactionId));
             }
             await DatabaseService.deleteApiQueueItem(item.QueueId);
             outcome.uploaded += 1;
@@ -669,8 +727,12 @@ const ApiService = {
             let params = item.Params;
             while (typeof params === 'string') params = JSON.parse(params);
             const transactionId = params.TransactionId || params.transactionId;
-            if (transactionId) await DatabaseService.updateTransactionSyncState(transactionId, 0, error.message || 'Upload failed');
+            if (transactionId && !uploadStateSaved) await DatabaseService.updateTransactionSyncState(transactionId, 0, error.message || 'Upload failed');
           } catch (parseError) {}
+          // Stop immediately on a disconnected network, expired session or
+          // unavailable server; leave the rest for the next retry.
+          if (!error.response || error.response.status === 401
+            || error.response.status === 429 || error.response.status >= 500) break;
         }
       }
       outcome.remaining = (await DatabaseService.getUnsyncedTransactions()).length;
@@ -695,6 +757,11 @@ const ApiService = {
   // clearTokens() behavior on 401).
   // --------------------------------------------------------------------
   logout: async () => {
+    if (syncInFlight) await syncInFlight;
+    if ((await DatabaseService.getUnsyncedTransactions()).length
+      || (await DatabaseService.getApiQueue('pending')).length) {
+      throw new Error('Upload pending collections before logging out.');
+    }
     await AsyncStorage.multiRemove(['loginKey', 'agentId', 'bankId', 'userPhone', 'lastOtpId', ACCOUNT_DOWNLOAD_TIME_FLAG_KEY]);
     await DatabaseService.clearUser();
   },

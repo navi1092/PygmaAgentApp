@@ -34,7 +34,7 @@ This document describes the current repository implementation for developers, te
 | Android printing | Bluetooth Classic and ESC/POS text |
 | iOS printing | Native iOS print sheet through `react-native-print` |
 | Location | `react-native-geolocation-service` |
-| Contacts | `react-native-select-contact` with native fallback |
+| Contacts | Native system contact picker |
 | Sharing | `react-native-share` |
 
 Common requirements:

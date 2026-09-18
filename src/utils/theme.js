@@ -1,4 +1,26 @@
-export const DEFAULT_PRIMARY_COLOR = '#2874B2';
+export const DEFAULT_PRIMARY_COLOR = '#847CFB';
+
+// Local presentation defaults. API BackColor still takes precedence below.
+export const UI_COLORS = {
+  text: '#000000',
+  secondaryText: '#808080',
+  surface: '#FFFFFF',
+  listBackground: '#F7F8FC',
+  inputBackground: '#FFFFFF',
+  border: '#D4D4D4',
+  search: '#B786E8',
+  success: '#006400',
+  error: '#B00020',
+};
+
+export const UI_FONT = {
+  caption: 12,
+  body: 14,
+  search: 14,
+  action: 16,
+  heading: 18,
+  title: 20,
+};
 
 // The Android API model stores BackColor as a signed ARGB integer. React
 // Native uses #RRGGBB, so retain the RGB bytes exactly as Android Color does.

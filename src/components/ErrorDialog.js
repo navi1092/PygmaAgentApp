@@ -6,9 +6,11 @@ import {
   TouchableOpacity,
   Image,
   StyleSheet,
+  ScrollView,
 } from 'react-native';
+import { DEFAULT_PRIMARY_COLOR, UI_COLORS, UI_FONT } from '../utils/theme';
 
-const ErrorDialog = ({ visible, message, onClose, primaryColor = '#2874B2' }) => {
+const ErrorDialog = ({ visible, message, onClose, primaryColor = DEFAULT_PRIMARY_COLOR }) => {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.dialogOverlay}>
@@ -17,8 +19,10 @@ const ErrorDialog = ({ visible, message, onClose, primaryColor = '#2874B2' }) =>
             <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
             <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
           </View>
-          <Text style={styles.dialogMessage}>{message}</Text>
-          <TouchableOpacity style={[styles.dialogButton, { backgroundColor: primaryColor }]} onPress={onClose}>
+          <ScrollView style={styles.messageScroll} contentContainerStyle={styles.messageContent}>
+            <Text style={styles.dialogMessage}>{message}</Text>
+          </ScrollView>
+          <TouchableOpacity accessibilityRole="button" style={[styles.dialogButton, { backgroundColor: primaryColor }]} onPress={onClose}>
             <Text style={styles.dialogButtonText}>Okay</Text>
           </TouchableOpacity>
         </View>
@@ -33,42 +37,39 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.58)',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 28,
+    paddingHorizontal: 20,
   },
   errorDialog: {
     width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#FFFFFF',
+    maxWidth: 420,
+    maxHeight: '72%',
+    backgroundColor: UI_COLORS.surface,
     padding: 16,
-    borderRadius: 14,
+    paddingBottom: 18,
+    borderRadius: 8,
     elevation: 8,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
   },
-  dialogBrandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E7EEF3',
-  },
-  dialogLogo: { width: 40, height: 40, borderRadius: 20 },
-  dialogBrand: { color: '#2874B2', fontSize: 20, fontWeight: '700', marginLeft: 6 },
-  dialogMessage: { color: '#17324D', fontSize: 16, lineHeight: 23, marginVertical: 16 },
+  dialogBrandRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 4 },
+  dialogLogo: { width: 44, height: 44, borderRadius: 22 },
+  dialogBrand: { fontSize: UI_FONT.title, fontWeight: '800', marginLeft: 6 },
+  messageScroll: { flexGrow: 0 },
+  messageContent: { paddingVertical: 10 },
+  dialogMessage: { color: UI_COLORS.text, fontSize: UI_FONT.action, fontWeight: '800', lineHeight: 23 },
   dialogButton: {
-    alignSelf: 'center',
-    minWidth: 120,
-    backgroundColor: '#2874B2',
-    borderRadius: 8,
-    minHeight: 44,
-    paddingHorizontal: 24,
+    alignSelf: 'flex-end',
+    minWidth: 90,
+    borderRadius: 16,
+    minHeight: 42,
+    paddingHorizontal: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: 10,
   },
-  dialogButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  dialogButtonText: { color: UI_COLORS.surface, fontSize: UI_FONT.action, fontWeight: '800', letterSpacing: 0.5 },
 });
 
 export default ErrorDialog;

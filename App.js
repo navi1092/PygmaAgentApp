@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, AppState } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { AppState, StatusBar } from 'react-native';
+import { DefaultTheme, NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import PygmaLoader from './src/components/PygmaLoader';
+import { UI_COLORS } from './src/utils/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,6 +21,7 @@ import ApiService from './src/services/ApiService';
 
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
+const navigationTheme = { ...DefaultTheme, colors: { ...DefaultTheme.colors, background: UI_COLORS.surface } };
 
 const App = () => {
   const [isInitializing, setIsInitializing] = useState(true);
@@ -38,9 +41,8 @@ const App = () => {
     };
 
     initializeApp();
-    // AuthInterceptor.java clears storage/database once on a 401 and Android
-    // restarts MainActivity. Reset to iOS's entry screen after the equivalent
-    // cleanup has completed.
+    // Reauthenticate on expiry; local collections remain available for the
+    // same agent to resume uploading after login.
     ApiService.setSessionExpiredHandler(() => {
       if (navigationRef.isReady()) {
         navigationRef.reset({ index: 0, routes: [{ name: 'MobileNumber' }] });
@@ -60,21 +62,22 @@ const App = () => {
 
   if (isInitializing) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#2874b2' }}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-      </View>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor={UI_COLORS.surface} />
+        <PygmaLoader fullScreen />
+      </>
     );
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: UI_COLORS.surface }}>
       <SafeAreaProvider>
-        <NavigationContainer ref={navigationRef}>
+        <NavigationContainer ref={navigationRef} theme={navigationTheme}>
           <Stack.Navigator
             screenOptions={{
               headerShown: false,
               animation: 'default',
-              contentStyle: { backgroundColor: '#2874b2' },
+              contentStyle: { backgroundColor: UI_COLORS.surface },
             }}
           >
             <Stack.Screen

@@ -125,9 +125,8 @@ const DatabaseService = {
     }
   },
 
-  // Android AuthInterceptor calls AppDatabase.clearAllTables() after a 401.
-  // Keep the same scope here so a session-expired user can never see or
-  // upload accounts/receipts belonging to the old session.
+  // Used when switching agents only after confirming there is no pending
+  // work. Session expiry must preserve this database for recovery.
   clearAllData: async () => {
     if (!db) return;
     try {
@@ -336,7 +335,7 @@ const DatabaseService = {
       return transactions;
     } catch (error) {
       console.log('Error getting transactions:', error);
-      return [];
+      throw error;
     }
   },
 
@@ -457,7 +456,7 @@ const DatabaseService = {
         'SELECT data FROM transactions WHERE TransactionId = ? LIMIT 1',
         [transactionId]
       );
-      if (!result[0].rows.length) return;
+      if (!result[0].rows.length) throw new Error('Transaction not found while updating upload status');
       const stored = JSON.parse(result[0].rows.item(0).data || '{}');
       await db.executeSql(
         'UPDATE transactions SET data = ? WHERE TransactionId = ?',
@@ -465,6 +464,7 @@ const DatabaseService = {
       );
     } catch (error) {
       console.log('Error updating transaction sync state:', error);
+      throw error;
     }
   },
 
@@ -581,7 +581,7 @@ const DatabaseService = {
       return queue;
     } catch (error) {
       console.log('Error getting API queue:', error);
-      return [];
+      throw error;
     }
   },
 
@@ -601,6 +601,7 @@ const DatabaseService = {
       await db.executeSql('DELETE FROM api_queue WHERE QueueId = ?', [queueId]);
     } catch (error) {
       console.log('Error deleting API queue item:', error);
+      throw error;
     }
   },
 

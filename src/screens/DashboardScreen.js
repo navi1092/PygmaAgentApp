@@ -1,3 +1,4 @@
+import PygmaLoader from '../components/PygmaLoader';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -6,7 +7,6 @@ import {
   TouchableOpacity,
   StatusBar,
   ScrollView,
-  ActivityIndicator,
   Alert,
   RefreshControl,
   Image,
@@ -19,7 +19,7 @@ import DatabaseService from '../database/DatabaseService';
 import ConnectivityService from '../services/ConnectivityService';
 import Svg, { Path } from 'react-native-svg';
 import ErrorDialog from '../components/ErrorDialog';
-import { getPrimaryColor } from '../utils/theme';
+import { getPrimaryColor, DEFAULT_PRIMARY_COLOR, UI_COLORS, UI_FONT } from '../utils/theme';
 import BluetoothService from '../services/BluetoothService';
 import ReceiptService from '../services/ReceiptService';
 import PrintIcon from '../assets/images/PrintIcon';
@@ -59,6 +59,7 @@ const DashboardScreen = ({ navigation }) => {
   const [showSubmitSheet, setShowSubmitSheet] = useState(false);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [submittedSummary, setSubmittedSummary] = useState({ amount: 0, transactions: 0 });
+  const [submittedMessage, setSubmittedMessage] = useState('Your collection has been submitted successfully.');
   const [errorMessage, setErrorMessage] = useState('');
   const [showError, setShowError] = useState(false);
   const [showDownloadSuccess, setShowDownloadSuccess] = useState(false);
@@ -183,7 +184,8 @@ const DashboardScreen = ({ navigation }) => {
     // live collection discard its only resumable local session; the server
     // rejects a new OTP login until that collection is submitted.
     if (collectionStatus === 2) {
-      Alert.alert('Collection in progress', 'Submit the current collection before logging out.');
+      setErrorMessage('Submit the current collection before logging out.');
+      setShowError(true);
       return;
     }
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -293,7 +295,8 @@ const DashboardScreen = ({ navigation }) => {
     if (pendingTransactions > 0) {
       ApiService.syncOfflineQueue().finally(fetchDashboardData);
       const label = pendingTransactions === 1 ? 'transaction is' : 'transactions are';
-      Alert.alert('Pending uploads', `${pendingTransactions} ${label} pending upload. Please try again once upload completes.`);
+      setErrorMessage(`${pendingTransactions} ${label} pending upload. Please try again once upload completes.`);
+      setShowError(true);
       return;
     }
     setShowSubmitSheet(true);
@@ -307,7 +310,8 @@ const DashboardScreen = ({ navigation }) => {
       const pendingTransactions = await ApiService.getPendingTransactionCount();
       if (pendingTransactions > 0) {
         setPendingUploadCount(pendingTransactions);
-        Alert.alert('Pending uploads', 'All collected transactions must be synced before submitting.');
+        setErrorMessage('All collected transactions must be synced before submitting.');
+        setShowError(true);
         return;
       }
       // Keep the exact local submission totals before submitCollection clears
@@ -346,6 +350,14 @@ const DashboardScreen = ({ navigation }) => {
       );
       const submittedStatus = Number(submitData.CollectionStatus ?? submitData.collectionStatus ?? 3) || 3;
       setSubmittedSummary({ amount: submittedAmount, transactions: submittedTransactions });
+      setSubmittedMessage(
+        response.message
+        || submitData.Message
+        || submitData.message
+        || submitData.StatusText
+        || submitData.statusText
+        || 'Your collection has been submitted successfully.'
+      );
       await DatabaseService.deleteAllAccounts();
       await DatabaseService.deleteAllTransactions();
       await DatabaseService.insertUser({ ...user, CollectionStatus: submittedStatus });
@@ -405,6 +417,7 @@ const DashboardScreen = ({ navigation }) => {
         setTimeout(() => setShowPrinterPicker(true), 250);
       }
     } catch (error) {
+      console.warn('[Printer] Print failed:', error.message || String(error));
       setErrorMessage(error.message || 'Unable to print the collection summary.');
       setShowError(true);
     } finally {
@@ -426,6 +439,7 @@ const DashboardScreen = ({ navigation }) => {
         getCollectionSummaryPayload(),
       );
     } catch (error) {
+      console.warn('[Printer] Print failed:', error.message || String(error));
       setErrorMessage(error.message || 'Unable to print the collection summary.');
       setShowError(true);
     } finally {
@@ -450,12 +464,12 @@ const DashboardScreen = ({ navigation }) => {
   const hasValidCollectionLimits = maxReceipts === undefined || maximumAmount === undefined
     || (Number(maxReceipts) > 0 && Number(maximumAmount) >= 0);
 
-  if (isLoading && !user) {
+  if (isLoading && !summary) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={primaryColor} />
+        <StatusBar barStyle="dark-content" backgroundColor={UI_COLORS.surface} />
         <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color={primaryColor} />
+          <PygmaLoader size="large" />
         </View>
       </View>
     );
@@ -493,35 +507,8 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         </View>
 
-        <Modal visible={showDownloadSuccess} transparent animationType="fade" onRequestClose={() => setShowDownloadSuccess(false)}>
-          <View style={styles.dialogOverlay}>
-            <View style={styles.successDialog}>
-              <View style={styles.dialogBrandRow}>
-                <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
-                <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
-              </View>
-              <Text style={styles.dialogMessage}>{downloadedAccountCount} accounts downloaded successfully</Text>
-              <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowDownloadSuccess(false)}>
-                <Text style={styles.dialogOkayText}>Okay</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal visible={showSubmitSuccess} transparent animationType="fade" onRequestClose={() => setShowSubmitSuccess(false)}>
-          <View style={styles.dialogOverlay}>
-            <View style={styles.successDialog}>
-              <View style={styles.dialogBrandRow}>
-                <Image source={require('../assets/images/logo.png')} style={styles.dialogLogo} />
-                <Text style={[styles.dialogBrand, { color: primaryColor }]}>Pygma</Text>
-              </View>
-              <Text style={styles.dialogMessage}>Collection submitted successfully{`\n`}Total Amount: {formatINR(submittedSummary.amount)}{`\n`}Total Transactions: {submittedSummary.transactions}</Text>
-              <TouchableOpacity style={[styles.dialogOkay, { backgroundColor: primaryColor }]} onPress={() => setShowSubmitSuccess(false)}>
-                <Text style={styles.dialogOkayText}>Okay</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        <ErrorDialog visible={showDownloadSuccess} message={`${downloadedAccountCount} accounts downloaded successfully`} primaryColor={primaryColor} onClose={() => setShowDownloadSuccess(false)} />
+        <ErrorDialog visible={showSubmitSuccess} message={`${submittedMessage}\nTotal Amount: ${formatINR(submittedSummary.amount)}\nTotal Transactions: ${submittedSummary.transactions}`} primaryColor={primaryColor} onClose={() => setShowSubmitSuccess(false)} />
 
         <ErrorDialog visible={showError} message={errorMessage} primaryColor={primaryColor} onClose={() => setShowError(false)} />
 
@@ -548,7 +535,7 @@ const DashboardScreen = ({ navigation }) => {
               ].map(([label, value]) => (
                 <View style={styles.sheetSummaryRow} key={label}>
                   <Text style={styles.sheetLine}>{label}</Text>
-                  <Text style={styles.sheetValue}>{value}</Text>
+                  <Text style={[styles.sheetValue, label === 'Total Amount' && { color: primaryColor }]}>{value}</Text>
                 </View>
               ))}
               <View style={styles.sheetActionRow}>
@@ -559,7 +546,7 @@ const DashboardScreen = ({ navigation }) => {
                   accessibilityLabel="Print collection summary"
                 >
                   {isPrintingSummary
-                    ? <ActivityIndicator size="small" color={primaryColor} />
+                    ? <PygmaLoader size="small" />
                     : <PrintIcon size={34} />}
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.sheetSubmitButton, { backgroundColor: primaryColor }]} onPress={confirmSubmitCollection}>
@@ -594,10 +581,15 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         </Modal>
 
+        {(isLoading || isRefreshing) && (
+          <View pointerEvents="none" style={styles.loadingOverlay}>
+            <PygmaLoader size={40} />
+          </View>
+        )}
         <ScrollView
           style={styles.scrollArea}
           refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={primaryColor} />
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="transparent" colors={['transparent']} progressBackgroundColor={UI_COLORS.surface} />
           }
           showsVerticalScrollIndicator={false}
         >
@@ -637,7 +629,7 @@ const DashboardScreen = ({ navigation }) => {
           {/* Android hides Download only during a live collection. A submitted
               collection must show Download so the next collection can begin. */}
           {collectionStatus !== 2 && (
-            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: primaryColor }]} onPress={handleDownloadAccounts}>
+            <TouchableOpacity disabled={isLoading} style={[styles.primaryButton, { backgroundColor: primaryColor }]} onPress={handleDownloadAccounts}>
               <Text style={styles.primaryButtonText}>
                 {collectionStatus === 3 ? 'Download' : (hasDownloadedAccounts ? 'Download Again' : 'Download')}
               </Text>
@@ -645,7 +637,7 @@ const DashboardScreen = ({ navigation }) => {
           )}
           {collectionStatus < 2 && hasDownloadedAccounts
             && Number(validation?.LastRefreshTimeFlag ?? validation?.lastRefreshTimeFlag ?? 0) === 0 && (
-            <TouchableOpacity style={[styles.outlineButton, { borderColor: primaryColor }]} onPress={handleStartCollection}>
+            <TouchableOpacity disabled={isLoading} style={[styles.outlineButton, { borderColor: primaryColor }]} onPress={handleStartCollection}>
               <Text style={[styles.outlineButtonText, { color: primaryColor }]}>Collect</Text>
             </TouchableOpacity>
           )}
@@ -673,68 +665,51 @@ const DashboardScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
   },
   loaderContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  dialogOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.58)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 28,
-  },
-  successDialog: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 14,
-    elevation: 8,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-  },
-  dialogBrandRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#E7EEF3' },
-  dialogLogo: { width: 40, height: 40, borderRadius: 20 },
-  dialogBrand: { color: '#2874B2', fontSize: 20, fontWeight: '700', marginLeft: 6 },
-  dialogMessage: { color: '#17324D', fontSize: 16, lineHeight: 23, marginVertical: 16 },
-  dialogOkay: { alignSelf: 'center', minWidth: 120, backgroundColor: '#2874B2', borderRadius: 8, minHeight: 44, paddingHorizontal: 24, justifyContent: 'center', alignItems: 'center', marginTop: 2 },
-  dialogOkayText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   sheetOverlay: { flex: 1, backgroundColor: 'rgba(16,37,54,0.52)', justifyContent: 'flex-end' },
-  submitSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 26, elevation: 10 },
+  submitSheet: { backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 26, elevation: 10 },
   sheetHandle: { alignSelf: 'center', width: 42, height: 4, borderRadius: 2, backgroundColor: '#C9D5DE', marginBottom: 18 },
-  sheetTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 },
-  sheetTitle: { color: '#17324D', fontSize: 21, fontWeight: '700' },
+  sheetTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sheetTitle: { color: UI_COLORS.text, fontSize: UI_FONT.title, fontWeight: '800', flexShrink: 1 },
   sheetCloseTouchTarget: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  sheetClose: { color: '#657789', fontSize: 20, fontWeight: '500', lineHeight: 24 },
-  sheetSummaryRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#EEF3F6' },
-  sheetLine: { color: '#657789', fontSize: 15 },
-  sheetValue: { color: '#17324D', fontSize: 15, fontWeight: '700', textAlign: 'right' },
+  sheetClose: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.title, fontWeight: '800', lineHeight: 24 },
+  sheetSummaryRow: { minHeight: 36, paddingVertical: 5, gap: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetLine: { color: '#4B5563', fontSize: UI_FONT.body, fontWeight: '800', flex: 1 },
+  sheetValue: { color: UI_COLORS.text, fontSize: UI_FONT.action, fontWeight: '800', textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums'] },
   sheetActionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20 },
-  sheetPrintButton: { width: 56, height: 52, borderWidth: 1.5, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
-  sheetSubmitButton: { flex: 1, backgroundColor: '#2874B2', borderRadius: 10, minHeight: 52, justifyContent: 'center', alignItems: 'center' },
+  sheetPrintButton: { width: 56, height: 52, borderWidth: 1.5, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: UI_COLORS.surface },
+  sheetSubmitButton: { flex: 1, backgroundColor: DEFAULT_PRIMARY_COLOR, borderRadius: 10, minHeight: 52, justifyContent: 'center', alignItems: 'center' },
   printerModalOverlay: { flex: 1, backgroundColor: 'rgba(16,37,54,0.52)', justifyContent: 'flex-end' },
-  printerModalCard: { width: '100%', maxHeight: '70%', backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
-  printerModalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 14 },
+  printerModalCard: { width: '100%', maxHeight: '70%', backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 24 },
+  printerModalTitle: { fontSize: UI_FONT.heading, fontWeight: '800', marginBottom: 14 },
   printerDeviceList: { paddingBottom: 4 },
-  printerDeviceRow: { backgroundColor: '#FFFFFF', borderRadius: 8, padding: 14, marginBottom: 10, elevation: 2, shadowColor: '#000000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.14, shadowRadius: 3 },
-  printerDeviceName: { color: '#111111', fontSize: 15, fontWeight: '700' },
-  printerDeviceAddress: { color: '#777777', fontSize: 12, marginTop: 4 },
-  printerEmptyText: { color: '#657789', fontSize: 14, paddingVertical: 20, textAlign: 'center' },
+  printerDeviceRow: { backgroundColor: UI_COLORS.listBackground, borderRadius: 8, padding: 14, marginBottom: 10, elevation: 2, shadowColor: UI_COLORS.text, shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.14, shadowRadius: 3 },
+  printerDeviceName: { color: UI_COLORS.text, fontSize: UI_FONT.body, fontWeight: '800' },
+  printerDeviceAddress: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.caption, marginTop: 4 },
+  printerEmptyText: { color: UI_COLORS.secondaryText, fontSize: UI_FONT.body, paddingVertical: 20, textAlign: 'center' },
   printerCancelButton: { alignSelf: 'flex-end', paddingHorizontal: 8, paddingTop: 10 },
-  printerCancelText: { fontSize: 16, fontWeight: '700' },
+  printerCancelText: { fontSize: UI_FONT.action, fontWeight: '800' },
   // The reference dashboard uses a white page with a purple header mask.
   topMask: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     paddingHorizontal: 28,
     paddingTop: 0,
     paddingBottom: 26,
+  },
+  // Keep loading feedback out of the flex layout. The former inline loader
+  // took up height and made the dashboard card jump while downloading.
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   bankRow: {
     flexDirection: 'row',
@@ -743,7 +718,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingTop: 28,
     paddingBottom: 62,
-    backgroundColor: '#2874B2',
+    backgroundColor: DEFAULT_PRIMARY_COLOR,
     borderBottomLeftRadius: 60,
     borderBottomRightRadius: 60,
   },
@@ -751,7 +726,7 @@ const styles = StyleSheet.create({
     width: 65,
     height: 65,
     borderRadius: 32.5,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     resizeMode: 'contain',
   },
   bankInfo: {
@@ -759,17 +734,19 @@ const styles = StyleSheet.create({
     marginLeft: 14,
   },
   bankName: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    fontWeight: '600',
+    fontSize: UI_FONT.heading,
+    color: UI_COLORS.surface,
+    fontWeight: '800',
   },
   bankAddress: {
-    fontSize: 14,
-    color: '#FFFFFF',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.surface,
+    fontWeight: '800',
   },
   bankContact: {
-    fontSize: 14,
-    color: '#FFFFFF',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.surface,
+    fontWeight: '800',
   },
   bankContactRow: {
     flexDirection: 'row',
@@ -781,7 +758,7 @@ const styles = StyleSheet.create({
     marginTop: -34,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     borderRadius: 16,
     padding: 18,
     margin: 12,
@@ -797,11 +774,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
   },
   statusStrip: {
-    backgroundColor: '#7F7BF4',
-    color: '#FFFFFF',
+    backgroundColor: DEFAULT_PRIMARY_COLOR,
+    color: UI_COLORS.surface,
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
     paddingVertical: 7,
   },
   transactionSummary: {
@@ -828,17 +805,19 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.surface,
     resizeMode: 'contain',
   },
   userName: {
-    fontSize: 18, // Heading3
-    color: '#000000',
+    fontSize: UI_FONT.heading, // Heading3
+    color: UI_COLORS.text,
+    fontWeight: '800',
     marginTop: 5,
   },
   userIdRow: {
-    fontSize: 14, // TextNormal
-    color: '#808080',
+    fontSize: UI_FONT.body, // TextNormal
+    color: UI_COLORS.secondaryText,
+    fontWeight: '800',
     marginTop: 5,
   },
   logoutRow: {
@@ -846,27 +825,27 @@ const styles = StyleSheet.create({
     display: 'none',
   },
   logoutText: {
-    fontSize: 18,
+    fontSize: UI_FONT.heading,
     color: '#FF0000',
-    fontWeight: '600',
+    fontWeight: '800',
   },
   summaryLabel: {
-    fontSize: 14,
-    color: '#000000',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.text,
     textAlign: 'center',
     display: 'none',
   },
   summaryAmount: {
-    fontSize: 20, // Heading2
-    color: '#000000',
+    fontSize: UI_FONT.title, // Heading2
+    color: UI_COLORS.text,
     textAlign: 'center',
     marginTop: 8,
-    fontWeight: '700',
+    fontWeight: '800',
     display: 'none',
   },
   summarySubLabel: {
-    fontSize: 14,
-    color: '#808080',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.secondaryText,
     textAlign: 'center',
     display: 'none',
   },
@@ -887,18 +866,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   statLabel: {
-    fontSize: 14,
-    color: '#808080',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.secondaryText,
   },
   statLabelSmall: {
-    fontSize: 12,
-    color: '#808080',
+    fontSize: UI_FONT.caption,
+    color: UI_COLORS.secondaryText,
+    fontWeight: '800',
     textAlign: 'center',
   },
   statValue: {
-    fontSize: 16, // TextBig
-    color: '#000000',
-    fontWeight: '600',
+    fontSize: UI_FONT.action, // TextBig
+    color: UI_COLORS.text,
+    fontWeight: '800',
   },
   bottomStatsRow: {
     flexDirection: 'row',
@@ -914,17 +894,17 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   statusBadge: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    backgroundColor: '#7F7BF4',
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
+    color: UI_COLORS.surface,
+    backgroundColor: DEFAULT_PRIMARY_COLOR,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 4,
     overflow: 'hidden',
   },
   statusLive: {
-    backgroundColor: '#006400', // green
+    backgroundColor: UI_COLORS.success,
   },
   statusOpen: {
     backgroundColor: '#FF9800', // orange
@@ -934,7 +914,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   primaryButton: {
-    backgroundColor: '#2874B2',
+    backgroundColor: DEFAULT_PRIMARY_COLOR,
     borderRadius: 10,
     minHeight: 52,
     paddingVertical: 14,
@@ -942,13 +922,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    color: UI_COLORS.surface,
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
   },
   outlineButton: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#2874B2',
+    backgroundColor: UI_COLORS.surface,
+    borderColor: DEFAULT_PRIMARY_COLOR,
     borderWidth: 1,
     borderRadius: 10,
     minHeight: 52,
@@ -957,9 +937,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   outlineButtonText: {
-    color: '#2874B2',
-    fontSize: 16,
-    fontWeight: '600',
+    color: DEFAULT_PRIMARY_COLOR,
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
   },
   poweredByRow: {
     flexDirection: 'row',
@@ -967,13 +947,14 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   poweredByLabel: {
-    fontSize: 14,
-    color: '#808080',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.secondaryText,
+    fontWeight: '800',
   },
   poweredByValue: {
-    fontSize: 14,
-    color: '#2874B2',
-    fontWeight: '700',
+    fontSize: UI_FONT.body,
+    color: DEFAULT_PRIMARY_COLOR,
+    fontWeight: '800',
   },
 });
 

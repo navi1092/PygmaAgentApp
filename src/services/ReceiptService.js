@@ -192,18 +192,18 @@ export const createCollectionSummaryText = ({ user, summary }) => {
 // ---------------------------------------------------------------------
 // PRINTER DISCOVERY & CONNECTION
 // ---------------------------------------------------------------------
-// BLE has no persistent "bonded devices" list the way Classic did, so
-// finding a printer means scanning for it. This wraps BluetoothService's
-// callback-based scanForDevices() into a Promise that resolves with
-// whatever was found in the given window.
+// Android includes paired and discoverable Classic printers as well as BLE.
+// iOS discovers BLE printers. Device IDs preserve the selected transport.
 const scanForPrinters = (timeoutMs = 10000) =>
   BluetoothService.discoverDevices({ timeoutMs });
 
 const deviceKey = (item) => item?.id;
 
 const getPrinterDevice = async (address = null) => {
+  console.info('[Printer] Checking connected printers');
   const connectedDevices = await BluetoothService.getConnectedDevices();
   const savedAddress = address || await AsyncStorage.getItem(PRINTER_ADDRESS_KEY);
+  console.info('[Printer] Starting discovery');
 
   // Already connected to the remembered printer this session? Use it
   // directly, no need to scan.
@@ -216,6 +216,7 @@ const getPrinterDevice = async (address = null) => {
   // Not connected — scan to find it (and any other nearby printers, in
   // case the saved one isn't reachable and the user needs to pick again).
   const scanned = await scanForPrinters();
+  console.info('[Printer] Discovery complete:', scanned.length);
   const savedDevice = savedAddress ? scanned.find((item) => deviceKey(item) === savedAddress) : null;
 
   return { devices: scanned, device: savedDevice || null };
@@ -231,8 +232,7 @@ const printToDevice = async (deviceId, text) => {
 };
 
 const ReceiptService = {
-  // Actively scans for nearby printers (BLE has no bonded-device list to
-  // read up front). Use this to populate a "select a printer" screen.
+  // Populate the picker with the printers supported on this platform.
   getPrinters: async () => scanForPrinters(),
 
   printReceipt: async (receipt, printerAddress = null) => {
@@ -250,7 +250,7 @@ const ReceiptService = {
   },
 
   printWithSelectedPrinter: async (printerAddress, receipt) => {
-    // printerAddress here is the BLE device id returned from getPrinters().
+    // Preserve the device ID returned from getPrinters(), including transport.
     await printToDevice(printerAddress, createReceiptText(receipt));
   },
 

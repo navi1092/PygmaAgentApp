@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import PygmaLoader from '../components/PygmaLoader';
+import { UI_COLORS, UI_FONT } from '../utils/theme';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,7 +8,6 @@ import {
   TextInput,
   TouchableOpacity,
   StatusBar,
-  ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -22,6 +23,9 @@ import LocationService from '../services/LocationService';
 import WelcomeIllustration from '../assets/images/WelcomeIllustration';
 import ErrorDialog from '../components/ErrorDialog';
 
+// Authentication is shown before the user profile (and its API BackColor) is available.
+const AUTH_PRIMARY_COLOR = '#2F7DB8';
+
 // Matches fragment_mobile_number.xml exactly:
 // title="Register" (TextBig=16sp) -> subTitle="Welcome to Pygma" (TextNormal=14sp, black)
 // -> ic_welcome image (250dp, 30dp vertical margin) -> outlined TextInputLayout
@@ -29,7 +33,9 @@ import ErrorDialog from '../components/ErrorDialog';
 // -> MaterialButtonRoundedCornersPrimary "Send OTP" (enabled only when 10 digits + checked)
 const MobileNumberScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
+  const scrollViewRef = useRef(null);
   const [mobileNumber, setMobileNumber] = useState('');
+  const [isMobileFocused, setIsMobileFocused] = useState(false);
   const [isTncChecked, setIsTncChecked] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -93,10 +99,11 @@ const MobileNumberScreen = ({ navigation }) => {
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <ScrollView
+        ref={scrollViewRef}
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + 24, paddingBottom: Math.max(insets.bottom, 32) },
@@ -117,13 +124,23 @@ const MobileNumberScreen = ({ navigation }) => {
 
         {/* tilPhone - outlined text field, hint "Mobile Number" */}
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Mobile Number</Text>
+          <Text
+            pointerEvents="none"
+            style={[styles.inputLabel, (isMobileFocused || mobileNumber) && styles.inputLabelFloating]}
+          >
+            Mobile Number
+          </Text>
           <TextInput
             style={styles.input}
             keyboardType="phone-pad"
             maxLength={10}
             value={mobileNumber}
             onChangeText={setMobileNumber}
+            onFocus={() => {
+              setIsMobileFocused(true);
+              setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 120);
+            }}
+            onBlur={() => setIsMobileFocused(false)}
             editable={!isLoading}
           />
         </View>
@@ -147,7 +164,7 @@ const MobileNumberScreen = ({ navigation }) => {
           disabled={!isFormValid || isLoading}
         >
           {isLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <PygmaLoader size="small" />
           ) : (
             <Text style={styles.buttonText}>Send OTP</Text>
           )}
@@ -162,7 +179,7 @@ const MobileNumberScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI_COLORS.inputBackground,
   },
   scrollContent: {
     flexGrow: 1,
@@ -172,14 +189,15 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#17324D',
+    fontSize: UI_FONT.title,
+    fontWeight: '800',
+    color: AUTH_PRIMARY_COLOR,
     marginTop: 0,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#657789',
+    fontSize: UI_FONT.action,
+    color: UI_COLORS.text,
+    fontWeight: '800',
     marginTop: 8,
     marginBottom: 8,
   },
@@ -195,22 +213,36 @@ const styles = StyleSheet.create({
   inputWrapper: {
     marginTop: 4,
     marginBottom: 16,
+    borderWidth: 2,
+    borderColor: UI_COLORS.search,
+    borderRadius: 8,
+    backgroundColor: UI_COLORS.surface,
   },
   inputLabel: {
-    fontSize: 13,
-    color: '#506579',
-    fontWeight: '600',
-    marginBottom: 8,
+    position: 'absolute',
+    top: 15,
+    left: 12,
+    zIndex: 1,
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.secondaryText,
+    fontWeight: '800',
+  },
+  inputLabelFloating: {
+    top: -10,
+    left: 10,
+    paddingHorizontal: 4,
+    backgroundColor: UI_COLORS.surface,
+    color: UI_COLORS.search,
+    fontSize: UI_FONT.caption,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#C8D4DE',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 17,
-    color: '#17324D',
-    backgroundColor: '#F8FAFC',
+    minHeight: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: UI_FONT.action,
+    fontWeight: '400',
+    color: UI_COLORS.text,
+    backgroundColor: 'transparent',
   },
   checkboxRow: {
     flexDirection: 'row',
@@ -222,27 +254,28 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderWidth: 2,
-    borderColor: '#2874B2',
+    borderColor: AUTH_PRIMARY_COLOR,
     borderRadius: 3,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
   },
   checkboxChecked: {
-    backgroundColor: '#2874B2',
+    backgroundColor: AUTH_PRIMARY_COLOR,
   },
   checkmark: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: 'bold',
+    color: UI_COLORS.surface,
+    fontSize: UI_FONT.body,
+    fontWeight: '800',
   },
   checkboxText: {
-    fontSize: 14,
-    color: '#506579',
+    fontSize: UI_FONT.body,
+    color: UI_COLORS.text,
+    fontWeight: '800',
     flex: 1,
   },
   button: {
-    backgroundColor: '#2874B2',
+    backgroundColor: AUTH_PRIMARY_COLOR,
     borderRadius: 10,
     minHeight: 52,
     paddingVertical: 14,
@@ -252,12 +285,13 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   buttonDisabled: {
+    backgroundColor: AUTH_PRIMARY_COLOR,
     opacity: 0.5,
   },
   buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    color: UI_COLORS.surface,
+    fontSize: UI_FONT.action,
+    fontWeight: '800',
   },
 });
 

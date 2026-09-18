@@ -79,8 +79,15 @@ android {
         applicationId "com.pygma"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Keep debug distribution small: current physical Android phones are arm64.
+        // This excludes emulator (x86/x86_64) and legacy 32-bit (armeabi-v7a) binaries.
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+        // Keep the Android package version in sync with AppVersionId sent to
+        // the API. App/appconfig uses this numeric value for update gating.
+        versionCode 12
+        versionName "1.0.12"
     }
     signingConfigs {
         debug {
@@ -107,7 +114,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    implementation("com.google.android.gms:play-services-auth-api-phone:18.2.0")
+    implementation("com.google.android.gms:play-services-auth-api-phone:18.1.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
